@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | Reels Scheduler{% endblock %}
+{% block body %}
+<main class="wrap" style="max-width:760px">
+  <h1>{{ title }}</h1>
+  <p class="muted small">Last updated {{ updated }}</p>
+  {% if kind == 'privacy' %}
+  <p>Reels Scheduler is a private tool. Its owner uses it to schedule Reels on Facebook Pages that the owner manages. It is not open to the public, and nobody else can sign up.</p>
+  <h2 style="margin-top:22px">What it stores</h2>
+  <p>When a Facebook account is connected, the tool stores that account's name and ID, the names, IDs and profile pictures of the Pages it manages, and the access keys Facebook provides for posting. Access keys are stored encrypted. For each scheduled Reel it stores the caption, the chosen Page and time, and the result. Uploaded videos are passed to Facebook and deleted from this server right after.</p>
+  <h2 style="margin-top:22px">How it is used</h2>
+  <p>This information is used only to publish and schedule Reels on the connected Pages, and to show their status. It is not sold, shared with anyone else, or used for advertising.</p>
+  <h2 style="margin-top:22px">Deleting your data</h2>
+  <p>See <a href="/data-deletion">how to delete your data</a>.</p>
+  {% else %}
+  <p>To remove everything this tool stores about a Facebook account and its Pages, do either of these:</p>
+  <ol>
+    <li>On the tool's <b>Pages</b> tab, tap <b>Remove</b> next to the account. Its saved access keys are deleted right away.</li>
+    <li>On Facebook, open <b>Settings and privacy</b>, then <b>Settings</b>, then <b>Business integrations</b> (or <b>Apps and websites</b>), and remove this app. Facebook then stops the app from posting for that account.</li>
+  </ol>
+  {% if contact %}<p>Questions: <a href="mailto:{{ contact }}">{{ contact }}</a></p>{% endif %}
+  {% endif %}
+</main>
+{% endblock %}

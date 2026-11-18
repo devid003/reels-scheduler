@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Pages | Reels Scheduler{% endblock %}
+{% block head %}
+<style>
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px;align-items:start}
+.steps{margin:0;padding-left:20px;color:var(--soft);font-size:14px}
+.steps li{margin:0 0 10px}
+.steps code,.copy code{background:var(--bg);border:1px solid var(--line2);border-radius:6px;padding:1px 6px;font-size:13px;word-break:break-all}
+.copy{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+summary::-webkit-details-marker{display:none}
+summary.panel-h{padding-bottom:16px}
+.acc{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.acc:first-child{border-top:0}
+.acc .n{flex:1;min-width:0}
+.acc .n b{display:block}
+.prow{border-top:1px solid var(--line);padding:16px 20px;display:grid;grid-template-columns:minmax(180px,1.1fr) minmax(200px,1.3fr) minmax(160px,1fr) auto;gap:14px;align-items:end}
+.prow:first-of-type{border-top:0}
+.pname{display:flex;gap:11px;align-items:center;min-width:0;align-self:center}
+.pname .av{width:36px;height:36px}
+.pname b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pname small{color:var(--faint);font-size:12.5px}
+.next{font-size:12.5px;color:var(--time);font-variant-numeric:tabular-nums}
+.pact{display:flex;gap:10px;align-items:center}
+.chk{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;cursor:pointer;height:40px}
+.chk input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
+.off{opacity:.55}
+@media (max-width:1000px){.grid2{grid-template-columns:1fr}.prow{grid-template-columns:1fr 1fr}.pname{grid-column:1/-1}}
+@media (max-width:560px){.prow{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block body %}
+<main class="wrap">
+  <h1>Pages</h1>
+  <p class="lead">Connect your Facebook accounts, then set when each Page should post. Times are in {{ tz }}.</p>
+
+  <div class="grid2">
+    <section class="panel" aria-labelledby="ph">
+      <div class="panel-h"><div><h2 id="ph">Your Pages</h2><p>Each new Reel goes to the Page's next free time below.</p></div></div>
+      {% if rows %}
+      <div style="margin-top:6px">
+      {% for r in rows %}{% set p = r.p %}
+        <form method="post" action="/pages/save" class="prow{{ ' off' if not p.active or p.gone }}" id="p{{ p.id }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ p.id }}">
+          <div class="pname">
+            {% if p.picture %}<img class="av" src="{{ p.picture }}" alt="">{% else %}<span class="av ph">{{ p.name[:1] }}</span>{% endif %}
+            <div style="min-width:0"><b>{{ p.name }}</b>
+              <small>{% if p.gone %}Not connected anymore{% else %}{{ r.account }}{% endif %}</small>
+              {% if r.next %}<div class="next">Next free: {{ r.next }}</div>{% endif %}</div>
+          </div>
+          <label class="f">Posting times<input type="text" name="slots" value="{{ p.slots }}" placeholder="9:00, 1:00 PM, 20:30"></label>
+          <label class="f">Always add (hashtags)<input type="text" name="tags" value="{{ p.tags }}" placeholder="#fyp #reels"></label>
+          <div class="pact">
+            <label class="chk"><input type="checkbox" name="active" value="1"{{ ' checked' if p.active }}> Use</label>
+            <button class="btn sm">Save</button>
+          </div>
+        </form>
+      {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty">No Pages yet. Connect a Facebook account to bring in the Pages you manage.</div>
+      {% endif %}
+    </section>
+
+    <div style="display:grid;gap:20px">
+      <section class="panel" aria-labelledby="ah">
+        <div class="panel-h"><div><h2 id="ah">Facebook accounts</h2><p>Connect every account that manages your Pages.</p></div></div>
+        <div class="panel-b">
+          {% for a in accounts %}
+          <div class="acc">
+            <div class="n"><b>{{ a.name }}</b>
+              {% if a.problem %}<span class="small" style="color:var(--bad)">{{ a.problem }}</span>{% else %}<span class="small muted">Connected {{ a.connected_at.strftime('%b %d, %Y') }}</span>{% endif %}</div>
+            <form method="post" action="/accounts/remove" class="inline" data-q="Remove {{ a.name }}? Its Pages stop posting until you connect it again." onsubmit="return confirm(this.dataset.q)">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn sm bad">Remove</button></form>
+          </div>
+          {% endfor %}
+          {% if ready %}
+          <a class="btn primary" href="/fb/connect" style="width:100%;margin-top:{{ '12px' if accounts else '0' }}">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5 21v-7.5h2.6l.4-3h-3V8.6c0-.9.3-1.5 1.5-1.5h1.6V4.4c-.3 0-1.2-.1-2.3-.1-2.3 0-3.9 1.4-3.9 4v2.2H7.8v3h2.6V21z"/></svg>
+            Connect a Facebook account</a>
+          <p class="small muted" style="margin:12px 0 0">Already connected? Connect it again to pick up new Pages. If an account is on a different Facebook login, log out of Facebook first, or open this site in a private window.</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="sh">
+        <details{{ ' open' if not ready or not accounts }}>
+        <summary class="panel-h" style="cursor:pointer;list-style:none"><div><h2 id="sh">One-time setup</h2><p>{{ 'Do these once. After that, tap Connect.' if not ready else ('Almost there: tap Connect above.' if not accounts else 'Done. Open again if you need the steps.') }}</p></div></summary>
+        <div class="panel-b">
+          <ol class="steps">
+            <li>On <b>developers.facebook.com</b>, tap <b>My Apps</b>, then <b>Create App</b>. Pick the use case <b>Manage everything on your Page</b>.</li>
+            <li>In the app, open <b>Facebook Login</b> settings and add this to <b>Valid OAuth Redirect URIs</b>:
+              <div class="copy"><code id="ru">{{ redirect_uri }}</code><button class="btn sm" type="button" data-copy="ru">Copy</button></div></li>
+            <li>In <b>App settings</b>, then <b>Basic</b>, fill in:
+              <div class="copy">Privacy Policy URL <code id="pp">{{ site }}/privacy</code><button class="btn sm" type="button" data-copy="pp">Copy</button></div>
+              <div class="copy">User data deletion <code id="dd">{{ site }}/data-deletion</code><button class="btn sm" type="button" data-copy="dd">Copy</button></div>
+              Add an app icon and a category, then save.</li>
+            <li>Still in <b>Basic</b>, copy the <b>App ID</b> and <b>App secret</b>. On Render, add them as <code>FB_APP_ID</code> and <code>FB_APP_SECRET</code>.</li>
+            <li>Switch the app from <b>Development</b> to <b>Live</b> (the switch at the top of the app dashboard). <b>Important:</b> while it's in Development, only you can see the Reels it posts.</li>
+            <li>Every other Facebook account you'll connect needs a role on the app: in <b>App roles</b>, add it as a <b>Tester</b>, then accept the invite from that account.</li>
+          </ol>
+          <p class="small muted" style="margin:6px 0 0">If Facebook shows an error about permissions when you connect, open <b>Facebook Login for Business</b>, then <b>Configurations</b>, create one with pages_show_list, pages_read_engagement and pages_manage_posts, and add its ID on Render as <code>FB_CONFIG_ID</code>.</p>
+          {% if not ready %}<p class="small" style="color:var(--warn);margin:4px 0 0">Waiting for FB_APP_ID and FB_APP_SECRET on Render.</p>{% endif %}
+        </div>
+        </details>
+      </section>
+    </div>
+  </div>
+</main>
+<script>
+document.addEventListener('click',function(e){
+  var b=e.target.closest&&e.target.closest('[data-copy]'); if(!b)return;
+  var t=document.getElementById(b.getAttribute('data-copy')).textContent;
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy';},1500);},function(){window.prompt('Copy this:',t);});
+});
+</script>
+{% endblock %}

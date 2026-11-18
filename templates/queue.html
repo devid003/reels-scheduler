@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% block title %}Queue | Reels Scheduler{% endblock %}
+{% block head %}
+<style>
+.cols{display:grid;grid-template-columns:420px minmax(0,1fr);gap:22px;align-items:start}
+.up{position:sticky;top:80px}
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;border:1.5px dashed var(--line2);border-radius:12px;
+  padding:22px 16px;cursor:pointer;color:var(--muted);font-size:14px;transition:border-color .15s,background .15s}
+.drop b{color:var(--ink);font-size:15px}
+.drop:hover,.drop.over{border-color:var(--accent);background:rgba(76,125,255,.06)}
+.drop input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+.files{display:grid;gap:10px;margin-top:12px}
+.file{border:1px solid var(--line);border-radius:12px;padding:10px;display:grid;grid-template-columns:54px minmax(0,1fr);gap:10px;background:var(--bg)}
+.file video{width:54px;height:96px;object-fit:cover;border-radius:8px;background:#000}
+.file .top{display:flex;align-items:center;gap:8px;min-width:0}
+.file .nm{flex:1;min-width:0;font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file .x{border:0;background:none;color:var(--faint);cursor:pointer;font-size:18px;line-height:1;padding:2px 4px}
+.file .x:hover{color:var(--ink)}
+.file .meta{font-size:12px;color:var(--faint);margin:2px 0 6px}
+.file .meta .warnt{color:var(--warn)}
+.file textarea{min-height:58px;font-size:13.5px;padding:7px 9px}
+.prog{height:6px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:8px}
+.prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.res{font-size:12.5px;margin-top:6px;color:var(--soft)}
+.res.bad{color:var(--bad)}
+.lbl{font-size:13px;font-weight:600;color:var(--soft);margin:18px 0 8px;display:flex;justify-content:space-between;align-items:center}
+.lbl button{border:0;background:none;color:var(--accent2);font:inherit;font-size:12.5px;cursor:pointer;padding:0}
+.grp{font-size:11.5px;color:var(--faint);margin:10px 0 6px;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{position:relative}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip span{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px 0 5px;border:1px solid var(--line2);border-radius:999px;cursor:pointer;font-size:13.5px;font-weight:600;max-width:220px}
+.chip span em{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip .av{width:26px;height:26px}
+.chip input:checked+span{border-color:var(--accent);background:rgba(76,125,255,.14)}
+.chip input:focus-visible+span{outline:2px solid var(--accent2);outline-offset:2px}
+.chip.noslot span{border-style:dashed}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg label{position:relative}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;border:1px solid var(--line2);border-radius:10px;padding:9px 11px;cursor:pointer;font-size:13.5px;font-weight:600;height:100%}
+.seg span small{display:block;font-weight:400;color:var(--faint);font-size:12px}
+.seg input:checked+span{border-color:var(--accent);background:rgba(76,125,255,.12)}
+.seg input:focus-visible+span{outline:2px solid var(--accent2);outline-offset:2px}
+.ai{display:flex;gap:9px;align-items:flex-start;margin-top:14px;font-size:13.5px;cursor:pointer}
+.ai input{margin:3px 0 0;width:16px;height:16px;accent-color:var(--accent);flex:none}
+.ai small{display:block;color:var(--faint);font-size:12px}
+.go{width:100%;height:46px;margin-top:16px;font-size:15px}
+.msg{font-size:13.5px;color:var(--bad);margin:10px 0 0}
+.msg:empty{display:none}
+
+.day{margin:0 0 22px}
+.day h3{font-size:13px;color:var(--muted);font-weight:700;margin:0 0 8px;letter-spacing:.01em}
+.item{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item .t{font-variant-numeric:tabular-nums;font-weight:700;color:var(--time);font-size:15px}
+.item .who{display:flex;gap:10px;align-items:center;min-width:0}
+.item .who div{min-width:0}
+.item .who b{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .who span{display:block;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .err{color:var(--bad);font-size:12.5px;white-space:normal}
+.item .r{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+.hist .t{color:var(--faint)}
+@media (max-width:1060px){.cols{grid-template-columns:1fr}.up{position:static}}
+@media (max-width:560px){.item{grid-template-columns:1fr auto}.item .t{grid-column:1/-1;font-size:14px}}
+</style>
+{% endblock %}
+{% block body %}
+<main class="wrap">
+  <h1>Queue</h1>
+  <p class="lead">Upload Reels once. Each one goes to the next free time on every Page you pick, and Facebook posts it then. Times are in {{ tz }}.</p>
+  <div class="cols">
+    <section class="panel up" aria-labelledby="uh">
+      <div class="panel-h"><div><h2 id="uh">Add Reels</h2><p>9:16 videos, 3 to 90 seconds, up to {{ max_mb }} MB each.</p></div></div>
+      <div class="panel-b">
+      {% if not has_pages %}
+        <div class="empty" style="padding:10px 0">No Pages to post to yet. <a href="/pages">Connect a Facebook account</a> first.</div>
+      {% else %}
+        <form id="up" autocomplete="off">
+          <label class="drop" id="drop"><input type="file" id="pick" accept="video/mp4,video/quicktime,video/*" multiple>
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 20h14"/></svg>
+            <b>Drop videos here or choose files</b><span>You can add many at once</span></label>
+          <div class="files" id="files"></div>
+
+          <div class="lbl"><span>Post to</span><button type="button" id="all">Select all</button></div>
+          {% for acc, pages in groups.items() %}
+            {% if groups|length > 1 %}<div class="grp">{{ acc }}</div>{% endif %}
+            <div class="chips">
+            {% for p in pages %}
+              <label class="chip{{ '' if p.slots else ' noslot' }}" title="{{ '' if p.slots else 'No posting times set: it can only post right away' }}">
+                <input type="checkbox" name="page" value="{{ p.id }}" data-slots="{{ 1 if p.slots else 0 }}">
+                <span>{% if p.pic %}<img class="av" src="{{ p.pic }}" alt="">{% else %}<i class="av ph">{{ p.name[:1] }}</i>{% endif %}<em>{{ p.name }}</em></span></label>
+            {% endfor %}
+            </div>
+          {% endfor %}
+
+          <div class="lbl"><span>When</span></div>
+          <div class="seg">
+            <label><input type="radio" name="when" value="queue" checked><span>Next free time<small>From each Page's posting times</small></span></label>
+            <label><input type="radio" name="when" value="now"><span>Right away<small>Posts as soon as it's sent</small></span></label>
+          </div>
+          <label class="ai"><input type="checkbox" id="ai" checked><span>Label as made with AI<small>Facebook shows an "AI info" label. Meta asks for it on realistic AI video.</small></span></label>
+          <button class="btn primary go" id="go" type="submit" disabled>Add videos first</button>
+          <p class="msg" id="msg" role="alert"></p>
+        </form>
+      {% endif %}
+      </div>
+    </section>
+
+    <div>
+      <section class="panel" aria-labelledby="qh">
+        <div class="panel-h"><div><h2 id="qh">Coming up</h2><p>Cancel any of these before its time.</p></div></div>
+        <div class="panel-b" style="padding:12px 0 6px">
+        {% for title, items in days %}
+          <div class="day"><h3 style="padding:0 16px">{{ title }}</h3>
+          {% for r in items %}
+            <div class="item">
+              <div class="t">{{ r.when.split(', ')[-1] if r.day else 'Now' }}</div>
+              <div class="who">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="">{% else %}<i class="av ph">{{ r.page[:1] }}</i>{% endif %}
+                <div><b>{{ r.page }}</b><span>{{ r.caption or r.file }}</span></div></div>
+              <div class="r">
+                {% if r.status == 'scheduled' %}<span class="badge time">On Facebook</span>
+                {% elif r.status == 'sending' %}<span class="badge go">Sending</span>
+                {% else %}<span class="badge">Waiting</span>{% endif %}
+                {% if r.status in ('scheduled', 'waiting') %}
+                <form method="post" action="/posts/cancel" class="inline" onsubmit="return confirm('Cancel this Reel? It will be removed from Facebook.')">
+                  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ r.id }}"><button class="btn sm bad">Cancel</button></form>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty">Nothing scheduled yet. Add Reels on the left.</div>
+        {% endfor %}
+        </div>
+      </section>
+
+      {% if recent %}
+      <section class="panel hist" aria-labelledby="hh" style="margin-top:20px">
+        <div class="panel-h"><div><h2 id="hh">Recent</h2><p>Posted, failed, and cancelled in the last 7 days.</p></div>
+          <form method="post" action="/posts/clear" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">Clear list</button></form></div>
+        <div class="panel-b" style="padding:8px 0 6px">
+        {% for r in recent %}
+          <div class="item">
+            <div class="t">{{ r.when }}</div>
+            <div class="who">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="">{% else %}<i class="av ph">{{ r.page[:1] }}</i>{% endif %}
+              <div><b>{{ r.page }}</b><span>{{ r.caption or r.file }}</span>{% if r.status == 'failed' and r.error %}<div class="err">{{ r.error }}</div>{% endif %}</div></div>
+            <div class="r">{% if r.status == 'posted' %}<span class="badge ok">Posted</span>{% elif r.status == 'failed' %}<span class="badge bad">Failed</span>{% else %}<span class="badge">Cancelled</span>{% endif %}</div>
+          </div>
+        {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+    </div>
+  </div>
+</main>
+{% if has_pages %}
+<script>
+(function(){
+  var CSRF={{ csrf|tojson }}, MAX={{ max_mb }}*1024*1024;
+  var $=function(id){return document.getElementById(id);};
+  var form=$('up'), pick=$('pick'), drop=$('drop'), list=$('files'), go=$('go'), msg=$('msg');
+  var items=[], busy=false;
+  function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
+  if(store('rsAi')==='0')$('ai').checked=false;
+  $('ai').addEventListener('change',function(){store('rsAi',this.checked?'1':'0');});
+  var saved=(store('rsPages')||'').split(',');
+  Array.prototype.forEach.call(form.querySelectorAll('input[name=page]'),function(c){if(saved.indexOf(c.value)>-1)c.checked=true;c.addEventListener('change',remember);});
+  function remember(){store('rsPages',checked().join(','));}
+  function checked(){return Array.prototype.filter.call(form.querySelectorAll('input[name=page]'),function(c){return c.checked;}).map(function(c){return c.value;});}
+  $('all').addEventListener('click',function(){var cs=form.querySelectorAll('input[name=page]'),on=checked().length<cs.length;
+    Array.prototype.forEach.call(cs,function(c){c.checked=on;});remember();});
+  function mb(n){return (n/1048576).toFixed(n<10485760?1:0)+' MB';}
+  function label(){var n=items.filter(function(i){return !i.done;}).length;
+    go.disabled=busy||!n; go.textContent=busy?'Working...':(n?('Upload and schedule '+n+' video'+(n>1?'s':'')):'Add videos first');}
+  function add(files){
+    Array.prototype.forEach.call(files,function(f){
+      if(!/^video\//.test(f.type)&&!/\.(mp4|mov|m4v)$/i.test(f.name))return;
+      var it={file:f,done:false}, el=document.createElement('div'); el.className='file'; it.el=el;
+      var url=URL.createObjectURL(f);
+      el.innerHTML='<video muted playsinline preload="metadata"></video><div><div class="top"><span class="nm"></span><button type="button" class="x" aria-label="Remove">&times;</button></div>'+
+        '<div class="meta"></div><textarea maxlength="2200" placeholder="Caption (optional)"></textarea><div class="prog" hidden><i></i></div><div class="res" role="status"></div></div>';
+      el.querySelector('.nm').textContent=f.name;
+      var v=el.querySelector('video'), meta=el.querySelector('.meta');
+      meta.textContent=mb(f.size);
+      v.addEventListener('loadedmetadata',function(){
+        var w=v.videoWidth,h=v.videoHeight,d=v.duration,notes=[];
+        if(w&&h&&Math.abs(w/h-9/16)>0.03)notes.push('not 9:16 ('+w+'×'+h+')');
+        if(d&&d>90.5)notes.push('longer than 90s');
+        if(d&&d<3)notes.push('shorter than 3s');
+        meta.innerHTML='';meta.appendChild(document.createTextNode(mb(f.size)+(d?', '+Math.round(d)+'s':'')+(w?', '+w+'×'+h:'')));
+        if(notes.length){var s=document.createElement('span');s.className='warnt';s.textContent=' Check: '+notes.join(', ');meta.appendChild(s);}
+        try{v.currentTime=Math.min(1,d/2);}catch(e){}
+      });
+      v.src=url;
+      if(f.size>MAX){meta.textContent=mb(f.size)+' is over the limit';meta.className='meta warnt';it.done=true;}
+      el.querySelector('.x').addEventListener('click',function(){if(it.sending)return;items.splice(items.indexOf(it),1);el.remove();URL.revokeObjectURL(url);label();});
+      el.querySelector('textarea').addEventListener('contextmenu',function(e){e.stopPropagation();});
+      items.push(it); list.appendChild(el);
+    });
+    label();
+  }
+  pick.addEventListener('change',function(){add(pick.files);pick.value='';});
+  ['dragenter','dragover'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.add('over');});});
+  ['dragleave','drop'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.remove('over');});});
+  drop.addEventListener('drop',function(e){if(e.dataTransfer&&e.dataTransfer.files)add(e.dataTransfer.files);});
+
+  function api(method,url,body,isJson){
+    var h={'X-CSRF':CSRF}; if(isJson)h['Content-Type']='application/json';
+    return fetch(url,{method:method,credentials:'same-origin',headers:h,body:isJson?JSON.stringify(body):body})
+      .then(function(r){return r.json().catch(function(){return {ok:false,msg:'The server had a problem ('+r.status+').'};}).then(function(j){j._status=r.status;return j;});});
+  }
+  function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+  async function sendFile(it,pages,when,ai){
+    var el=it.el, bar=el.querySelector('.prog'), fill=bar.querySelector('i'), res=el.querySelector('.res');
+    function say(t,bad){res.textContent=t;res.className='res'+(bad?' bad':'');}
+    it.sending=true; bar.hidden=false; say('Uploading...');
+    var f=it.file, init=await api('POST','/api/upload',{name:f.name,size:f.size},true);
+    if(!init.ok)throw new Error(init.msg||'Upload could not start.');
+    var off=0, step=init.chunk||8388608, tries=0;
+    while(off<f.size){
+      var r;
+      try{r=await api('PUT','/api/upload/'+init.id+'?offset='+off,f.slice(off,Math.min(off+step,f.size)),false);}
+      catch(e){r={ok:false,_status:0};}
+      if(r.ok){off=r.have;tries=0;fill.style.width=Math.round(off/f.size*100)+'%';say('Uploading '+Math.round(off/f.size*100)+'%');continue;}
+      if(r._status===409&&typeof r.have==='number'){off=r.have;continue;}
+      if(r._status===0&&++tries<=4){say('Connection hiccup, retrying...');await sleep(1500*tries);continue;}
+      throw new Error(r.msg||'Upload stopped. Check your connection and try again.');
+    }
+    say('Sending to Facebook...');
+    var done=await api('POST','/api/upload/'+init.id+'/done',{caption:el.querySelector('textarea').value,pages:pages,when:when,ai:ai},true);
+    if(!done.ok)throw new Error(done.msg||'Could not schedule it.');
+    var plan=done.plan.map(function(p){return p.page+': '+p.when;}).join('; ');
+    say((done.skipped&&done.skipped.length?'Skipped '+done.skipped.join('; ')+'. ':'')+'Sending to Facebook. '+plan);
+    for(var k=0;k<240;k++){
+      await sleep(3000);
+      var st=await fetch('/api/posts?ids='+done.ids.join(','),{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json();}).catch(function(){return null;});
+      if(!st||!st.posts)continue;
+      var left=st.posts.filter(function(p){return p.status==='waiting'||p.status==='sending';});
+      if(left.length)continue;
+      var bad=st.posts.filter(function(p){return p.status==='failed';});
+      var good=st.posts.filter(function(p){return p.status!=='failed';}).map(function(p){return p.page+' '+p.when;});
+      say((good.length?'Scheduled on Facebook: '+good.join('; ')+'. ':'')+(bad.length?'Failed: '+bad.map(function(p){return p.page+' ('+p.error+')';}).join('; '):''),bad.length&&!good.length);
+      return !bad.length;
+    }
+    say('Still sending. Check the queue in a few minutes.');return true;
+  }
+  form.addEventListener('submit',async function(e){
+    e.preventDefault(); if(busy)return;
+    var pages=checked(), when=form.querySelector('input[name=when]:checked').value;
+    msg.textContent='';
+    if(!pages.length){msg.textContent='Pick at least one Page.';return;}
+    if(when==='queue'){var none=Array.prototype.filter.call(form.querySelectorAll('input[name=page]:checked'),function(c){return c.getAttribute('data-slots')==='0';});
+      if(none.length){msg.textContent='Some Pages you picked have no posting times. Set them on the Pages tab, or choose Right away.';return;}}
+    busy=true; label(); var allOk=true;
+    for(var i=0;i<items.length;i++){
+      var it=items[i]; if(it.done)continue;
+      try{ if(!await sendFile(it,pages,when,$('ai').checked))allOk=false; }
+      catch(err){allOk=false;var res=it.el.querySelector('.res');res.textContent=err.message;res.className='res bad';}
+      it.done=true; it.sending=false;
+    }
+    busy=false; label();
+    if(allOk){msg.style.color='var(--ok)';msg.textContent='All done. Updating the queue...';setTimeout(function(){location.reload();},1800);}
+  });
+  window.addEventListener('beforeunload',function(e){if(busy){e.preventDefault();e.returnValue='';}});
+})();
+</script>
+{% endif %}
+{% endblock %}
