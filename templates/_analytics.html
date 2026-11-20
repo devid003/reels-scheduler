@@ -67,6 +67,35 @@
 .an .vcell{display:flex;align-items:center;justify-content:flex-end;gap:12px}
 .an .foot{color:var(--muted);font-size:13px;margin:12px 2px 0;line-height:1.55}
 .an .tbl td,.an .tbl th{padding:6px 10px;font-size:13px}
+.an .psw{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;margin:0 0 14px;scrollbar-width:thin}
+.an .psw a{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 13px 0 6px;border:1px solid var(--line2);border-radius:999px;
+  color:var(--soft);text-decoration:none;font-size:13.5px;font-weight:600;white-space:nowrap;flex:none}
+.an .psw a.all{padding-left:14px}
+.an .psw a:hover{background:var(--raise);color:var(--ink)}
+.an .psw a[aria-current="page"]{background:var(--raise);border-color:var(--accent);color:var(--ink)}
+.an .psw .av{width:28px;height:28px}
+.an .psw .st{font-size:11px;font-weight:800;width:16px;text-align:center}
+.an .st.ok{color:var(--ok)}.an .st.time{color:var(--warn)}.an .st.bad{color:var(--bad)}.an .st{color:var(--muted)}
+.an h2.sec{font-size:15px;color:var(--soft);margin:26px 0 12px}
+.an .pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin:0 0 8px}
+.an .pcard{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:15px 16px;color:var(--ink);text-decoration:none;min-width:0}
+.an .pcard:hover{border-color:var(--line2);background:#171d29}
+.an .pcard .ph{display:flex;align-items:center;gap:10px;min-width:0}
+.an .pcard .ph b{flex:1;min-width:0;font-size:15px;line-height:1.3;overflow-wrap:anywhere}
+.an .pcard .av{width:34px;height:34px}
+.an .pcard .pv{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.an .pcard .big{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.an .pcard .pv .k{color:var(--muted);font-size:13px}
+.an .pcard .pv b{font-size:12.5px}.an .pcard .pv b.up{color:var(--ok)}.an .pcard .pv b.down{color:var(--bad)}
+.an .pspark{display:block;width:100%;height:46px}
+.an .pspark polyline{fill:none;stroke:var(--views);stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.an .pspark polygon{fill:var(--views);opacity:.1}
+.an .pspark.none{display:grid;place-items:center;color:var(--faint);font-size:12.5px;border:1px dashed var(--line2);border-radius:8px}
+.an .pm{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0;padding-top:10px;border-top:1px solid var(--line)}
+.an .pm dt{font-size:11.5px;color:var(--muted);font-weight:600}
+.an .pm dd{margin:2px 0 0;font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.an .pcard .note{margin:0}
 </style>
 {% endmacro %}
 
@@ -165,4 +194,13 @@
   {% endif %}
 })();
 </script>
+{% endmacro %}
+
+{% macro switcher(items, current) %}
+<nav class="psw" aria-label="Pages">
+  <a class="all" href="/analytics?range={{ rng }}"{% if not current %} aria-current="page"{% endif %}>All Pages</a>
+  {% for s in items %}<a href="/analytics/page/{{ s.id }}?range={{ rng }}"{% if current == s.id %} aria-current="page"{% endif %}>
+    {% if s.pic %}<img class="av" src="{{ s.pic }}" alt="" data-l="{{ s.name[:1] }}">{% else %}<span class="av ph" aria-hidden="true">{{ s.name[:1] }}</span>{% endif %}
+    {{ s.name }}<span class="st {{ s.cls }}" title="Status: {{ s.label }}" aria-label="Status: {{ s.label }}">{{ s.icon }}</span></a>{% endfor %}
+</nav>
 {% endmacro %}

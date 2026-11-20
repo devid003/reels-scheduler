@@ -21,7 +21,7 @@
 </style>{% endblock %}
 {% block body %}
 <main class="wrap an">
-  <a class="back" href="/analytics?range={{ rng }}">All Pages</a>
+  {{ an.switcher(switch, current) }}
   <div class="who">
     {% if p.picture %}<img class="av" src="{{ p.picture }}" alt="" data-l="{{ p.name[:1] }}">{% else %}<span class="av ph" aria-hidden="true">{{ p.name[:1] }}</span>{% endif %}
     <h1>{{ p.name }}</h1>

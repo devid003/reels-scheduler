@@ -1103,18 +1103,35 @@ def _build_view(pages: list, rng: int) -> dict:
 
     health = db.health_all()
     page_rows = []
-    for p in pages:
+    for p in sorted(pages, key=lambda x: x.name.casefold()):
         h = health.get(p.id)
+        v_now, v_before = total("views", days, p.id), total("views", prev, p.id)
+        change = (v_now - v_before) / abs(v_before) * 100 if v_now is not None and v_before else None
+        spark = _spark(daily("views", p.id))
         page_rows.append({"id": p.id, "name": p.name, "pic": p.picture, "health": _health(h),
-                          "views": _fmt_n(total("views", days, p.id)), "engagements": _fmt_n(total("engagements", days, p.id)),
+                          "delta": None if change is None else ("+" if change >= 0 else MINUS) + f"{abs(change):.0f}%",
+                          "up": change is not None and change >= 0, "video_views": _fmt_n(total("video_views", days, p.id)),
+                          "spark_area": (spark.split(" ")[0].split(",")[0] + ",30 " + spark + " " + spark.split(" ")[-1].split(",")[0] + ",30")
+                          if spark else "",
+                          "views": _fmt_n(v_now), "engagements": _fmt_n(total("engagements", days, p.id)),
                           "follows": _fmt_n(total("follows", days, p.id)),
                           "earnings": _fmt_money(total("earn_micros", days, p.id), cur),
-                          "spark": _spark(daily("views", p.id)),
+                          "spark": spark,
                           "note": (h.stats_note if h else "") or "", "earn_note": (h.earn_note if h else "") or "",
                           "short_note": ((h.stats_note if h else "") or "").split(". ")[0].rstrip(".") + "." if h and h.stats_note else "",
                           "checked": h.checked_at if h else None})
     return {"days": days, "cur": cur, "tiles": tiles, "total": total, "daily": daily, "page_rows": page_rows,
             "health": health, "first": days[0], "last": days[-1]}
+
+
+def _switch(pages: list) -> list:
+    """The Page switcher: every connected Page with its status, A to Z."""
+    health = db.health_all()
+    out = []
+    for p in sorted(pages, key=lambda x: x.name.casefold()):
+        hl = _health(health.get(p.id))
+        out.append({"id": p.id, "name": p.name, "pic": p.picture, "cls": hl["cls"], "icon": hl["icon"], "label": hl["label"]})
+    return out
 
 
 def _range(request) -> int:
@@ -1149,6 +1166,7 @@ async def analytics_page(request):
     views = v["daily"]("views")
     earn = v["daily"]("earn_micros")
     return page(request, "analytics.html", rng=rng, ranges=RANGES, state=ANALYTICS, has_pages=bool(pages),
+                switch=await run(_switch, pages), current=None,
                 updated=_updated_text(await run(db.get_setting, "analytics_at", "")), tiles=v["tiles"](),
                 views_chart=_chart(v["days"], views), earn_chart=_chart(v["days"], earn, True, v["cur"]),
                 has_earn=any(x is not None for x in earn), rows=v["page_rows"], first=_day_label(v["first"], True),
@@ -1175,6 +1193,7 @@ async def analytics_one(request):
     reels = await run(db.reels_for, p.id)
     row = v["page_rows"][0]
     return page(request, "analytics_page.html", p=p, row=row, rng=rng, ranges=RANGES, state=ANALYTICS,
+                switch=await run(_switch, _analytics_pages(await run(db.list_pages))), current=p.id,
                 updated=_updated_text(await run(db.get_setting, "analytics_at", "")), tiles=v["tiles"](p.id),
                 views_chart=_chart(v["days"], views), earn_chart=_chart(v["days"], earn, True, v["cur"]),
                 has_earn=any(x is not None for x in earn), first=_day_label(v["first"], True), last=_day_label(v["last"], True),
