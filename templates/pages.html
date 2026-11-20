@@ -25,6 +25,7 @@ summary.panel-h{padding-bottom:16px}
 .chk input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .off{opacity:.55}
 div.f{font-size:13px;font-weight:600;color:var(--soft)}
+.hiddennote{margin:12px 16px 4px;font-size:12.5px;line-height:1.5;color:var(--faint)}
 .slots{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px;min-height:30px;align-items:center}
 .slot{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 4px 0 11px;border-radius:999px;background:rgba(242,184,75,.1);
   border:1px solid rgba(242,184,75,.35);color:var(--time);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -71,8 +72,9 @@ div.f{font-size:13px;font-weight:600;color:var(--soft)}
       {% endfor %}
       </div>
       {% else %}
-      <div class="empty">No Pages yet. Connect a Facebook account to bring in the Pages you manage.</div>
+      <div class="empty">{% if hidden %}No connected Pages right now.{% else %}No Pages yet.{% endif %} Connect a Facebook account to bring in the Pages you manage.</div>
       {% endif %}
+      {% if hidden %}<p class="hiddennote">{{ hidden }} Page{{ 's are' if hidden > 1 else ' is' }} hidden because no connected Facebook account can post to {{ 'them' if hidden > 1 else 'it' }}. To bring one back, connect its account again and tick that Page in the Facebook window. Its posting times are kept.</p>{% endif %}
     </section>
 
     <div style="display:grid;gap:20px">

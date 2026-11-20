@@ -319,11 +319,14 @@ async def pages_page(request):
     accounts = await run(db.list_accounts)
     pages = await run(db.list_pages)
     names = {a.id: a.name for a in accounts}
-    rows = []
+    rows, hidden = [], 0
     for p in pages:
-        nxt = next_free(p.slots, await run(db.taken_times, p.id), 1) if p.active and not p.gone else []
+        if p.gone or not p.token_enc:   # no connected account can post to it: keep its settings, just don't list it
+            hidden += 1
+            continue
+        nxt = next_free(p.slots, await run(db.taken_times, p.id), 1) if p.active else []
         rows.append({"p": p, "account": names.get(p.account_id, ""), "next": when_text(nxt[0]) if nxt else ""})
-    return page(request, "pages.html", accounts=accounts, rows=rows, ready=bool(fb.app_id() and fb.app_secret()),
+    return page(request, "pages.html", accounts=accounts, rows=rows, hidden=hidden, ready=bool(fb.app_id() and fb.app_secret()),
                 redirect_uri=redirect_uri(request), site=public_url(request), tz=str(TZ.key))
 
 
