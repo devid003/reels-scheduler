@@ -63,6 +63,7 @@ form.inline{display:inline}
 @media (max-width:640px){.bar-in{gap:12px;padding:0 14px}.brand span{display:none}.wrap{padding:18px 14px 60px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
+<script>document.addEventListener('error',function(e){var t=e.target;if(!t||t.tagName!=='IMG'||!t.classList.contains('av'))return;var s=document.createElement('span');s.className='av ph';s.textContent=t.getAttribute('data-l')||'';s.setAttribute('aria-hidden','true');t.replaceWith(s);},true);</script>
 {% block head %}{% endblock %}
 </head>
 <body>

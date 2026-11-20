@@ -105,7 +105,7 @@
             {% for p in pages %}
               <label class="chip{{ '' if p.slots else ' noslot' }}" title="{{ '' if p.slots else 'No posting times set: it can only post right away' }}">
                 <input type="checkbox" name="page" value="{{ p.id }}" data-slots="{{ 1 if p.slots else 0 }}">
-                <span>{% if p.pic %}<img class="av" src="{{ p.pic }}" alt="">{% else %}<i class="av ph">{{ p.name[:1] }}</i>{% endif %}<em>{{ p.name }}</em></span></label>
+                <span>{% if p.pic %}<img class="av" src="{{ p.pic }}" alt="" data-l="{{ p.name[:1] }}">{% else %}<i class="av ph">{{ p.name[:1] }}</i>{% endif %}<em>{{ p.name }}</em></span></label>
             {% endfor %}
             </div>
           {% endfor %}
@@ -133,7 +133,7 @@
           {% for r in items %}
             <div class="item">
               <div class="t">{{ r.when.split(', ')[-1] if r.day else 'Now' }}</div>
-              <div class="who">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="">{% else %}<i class="av ph">{{ r.page[:1] }}</i>{% endif %}
+              <div class="who">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="" data-l="{{ r.page[:1] }}">{% else %}<i class="av ph">{{ r.page[:1] }}</i>{% endif %}
                 <div><b>{{ r.page }}</b><span>{{ r.caption or r.file }}</span>{% if r.error %}<div class="note">{{ r.error }}</div>{% endif %}</div></div>
               <div class="r">
                 {% if r.status == 'scheduled' %}<span class="badge time">On Facebook</span>
@@ -161,7 +161,7 @@
         {% for r in recent %}
           <div class="item">
             <div class="t">{{ r.when }}</div>
-            <div class="who">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="">{% else %}<i class="av ph">{{ r.page[:1] }}</i>{% endif %}
+            <div class="who">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="" data-l="{{ r.page[:1] }}">{% else %}<i class="av ph">{{ r.page[:1] }}</i>{% endif %}
               <div><b>{{ r.page }}</b><span>{{ r.caption or r.file }}</span>{% if r.status == 'failed' and r.error %}<div class="err">{{ r.error }}</div>{% endif %}</div></div>
             <div class="r">{% if r.status == 'posted' %}<span class="badge ok">Posted</span>{% elif r.status == 'failed' %}<span class="badge bad">Failed</span>{% else %}<span class="badge">Cancelled</span>{% endif %}</div>
           </div>

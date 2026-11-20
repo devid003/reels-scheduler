@@ -729,7 +729,7 @@ async def deletion_page(request):
 
 # ---------- security headers ----------
 class SecurityHeaders:
-    CSP = ("default-src 'self'; img-src 'self' data: blob: https://*.fbcdn.net https://*.facebook.com; "
+    CSP = ("default-src 'self'; img-src 'self' data: blob: https://*.fbcdn.net https://*.fbsbx.com https://*.facebook.com; "
            "media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
            "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://www.facebook.com; "
            "object-src 'none'")

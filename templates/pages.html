@@ -53,7 +53,7 @@ div.f{font-size:13px;font-weight:600;color:var(--soft)}
         <form method="post" action="/pages/save" class="prow{{ ' off' if not p.active or p.gone }}" id="p{{ p.id }}" novalidate>
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ p.id }}">
           <div class="pname">
-            {% if p.picture %}<img class="av" src="{{ p.picture }}" alt="">{% else %}<span class="av ph">{{ p.name[:1] }}</span>{% endif %}
+            {% if p.picture %}<img class="av" src="{{ p.picture }}" alt="" data-l="{{ p.name[:1] }}">{% else %}<span class="av ph">{{ p.name[:1] }}</span>{% endif %}
             <div style="min-width:0"><b>{{ p.name }}</b>
               <small>{% if p.gone %}Not connected anymore{% else %}{{ r.account }}{% endif %}</small>
               {% if r.next %}<div class="next">Next free: {{ r.next }}</div>{% endif %}</div>
