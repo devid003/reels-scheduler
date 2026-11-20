@@ -1,0 +1,168 @@
+{# Shared pieces for the Analytics pages: styles, range + refresh row, stat tiles, charts, hover script. #}
+{% macro styles() %}
+<style>
+.an{--views:#3987e5;--earn:#199e70;--grid:#232a3a;--base:#38425a}
+.an .toprow{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin:0 0 18px}
+.an .seg{display:inline-flex;border:1px solid var(--line2);border-radius:10px;overflow:hidden}
+.an .seg a{padding:7px 13px;font-size:13.5px;font-weight:600;color:var(--muted);text-decoration:none}
+.an .seg a+a{border-left:1px solid var(--line2)}
+.an .seg a:hover{color:var(--ink);background:var(--raise)}
+.an .seg a[aria-current="page"]{color:var(--ink);background:var(--raise)}
+.an .upd{color:var(--muted);font-size:13px}
+.an .upd b{color:var(--soft);font-weight:600}
+.an .upd.err{color:var(--bad)}
+.an .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 16px}
+.an .tile{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px 13px}
+.an .tile .k{font-size:13px;color:var(--muted);font-weight:600}
+.an .tile .v{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:4px 0 2px;line-height:1.15}
+.an .tile .v.none{color:var(--faint)}
+.an .tile .d{font-size:12.5px;color:var(--muted)}
+.an .tile .d b{font-weight:700}
+.an .tile .d b.up{color:var(--ok)}
+.an .tile .d b.down{color:var(--bad)}
+.an .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 16px}
+@media (max-width:900px){.an .grid2{grid-template-columns:1fr}}
+.an .chart{position:relative;padding:4px 0 0 48px;outline:none;border-radius:10px}
+.an .chart:focus-visible{outline:2px solid var(--accent2);outline-offset:4px}
+.an .plot{position:relative;height:200px}
+.an .plot svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.an .grid{stroke:var(--grid);stroke-width:1;vector-effect:non-scaling-stroke}
+.an .grid.base{stroke:var(--base)}
+.an .ln{fill:none;stroke:var(--c);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.an .area{fill:var(--c);opacity:.1}
+.an .dot{position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--c);box-shadow:0 0 0 2px var(--surface);pointer-events:none}
+.an .yax{position:absolute;left:0;top:4px;height:200px;width:42px}
+.an .yax span{position:absolute;right:0;transform:translateY(50%);font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.an .xax{position:relative;height:22px;margin-top:6px}
+.an .xax span{position:absolute;transform:translateX(-50%);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.an .xax span:first-child{transform:none}
+.an .xax span.lastx{transform:translateX(-100%)}
+.an .cols{position:absolute;inset:0;display:flex;align-items:flex-end;gap:2px}
+.an .cols span{flex:1;display:flex;justify-content:center;align-items:flex-end;height:100%}
+.an .cols i{display:block;width:100%;max-width:24px;background:var(--c);border-radius:4px 4px 0 0;min-height:0}
+.an .cols span.on i{filter:brightness(1.25)}
+.an .xh{position:absolute;top:0;bottom:0;width:1px;background:var(--line2);pointer-events:none}
+.an .tip{position:absolute;top:-6px;z-index:3;background:var(--raise);border:1px solid var(--line2);border-radius:9px;padding:7px 10px;
+  pointer-events:none;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.an .tip b{display:flex;align-items:center;gap:7px;font-size:14px}
+.an .tip b::before{content:"";width:12px;height:2px;border-radius:2px;background:var(--c)}
+.an .tip span{display:block;font-size:12px;color:var(--muted)}
+.an .nodata{display:grid;place-items:center;height:200px;color:var(--muted);font-size:14px;text-align:center;padding:0 20px}
+.an details.tbl{margin-top:10px}
+.an details.tbl summary{cursor:pointer;color:var(--muted);font-size:13px;width:max-content}
+.an details.tbl summary:hover{color:var(--ink)}
+.an .scroll{overflow-x:auto}
+.an table{width:100%;border-collapse:collapse;font-size:14px}
+.an th{text-align:left;font-size:12.5px;color:var(--muted);font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.an td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.an tr:last-child td{border-bottom:0}
+.an td.n,.an th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.an .pname{display:flex;align-items:center;gap:10px;min-width:180px}
+.an .pname a{color:var(--ink);font-weight:600;text-decoration:none}
+.an .pname a:hover{text-decoration:underline}
+.an .pname .av{width:32px;height:32px}
+.an .note{font-size:12.5px;color:var(--warn);margin-top:2px;line-height:1.4}
+.an .spark{display:block;width:90px;height:30px}
+.an .spark polyline{fill:none;stroke:var(--views);stroke-width:1.5;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.an .vcell{display:flex;align-items:center;justify-content:flex-end;gap:12px}
+.an .foot{color:var(--muted);font-size:13px;margin:12px 2px 0;line-height:1.55}
+.an .tbl td,.an .tbl th{padding:6px 10px;font-size:13px}
+</style>
+{% endmacro %}
+
+{% macro toprow(rng, ranges, state, updated, base, back) %}
+<div class="toprow">
+  <nav class="seg" aria-label="Date range">{% for r in ranges %}<a href="{{ base }}?range={{ r }}"{% if r == rng %} aria-current="page"{% endif %}>{{ r }} days</a>{% endfor %}</nav>
+  <span class="upd{{ ' err' if state.error }}" id="an-upd" aria-live="polite">{% if state.running %}Getting numbers from Facebook, {{ state.done }} of {{ state.total }} Pages done{% elif state.error %}{{ state.error }}{% else %}Updated <b>{{ updated }}</b>{% endif %}</span>
+  <form method="post" action="/analytics/refresh" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ back }}">
+    <button class="btn sm" id="an-refresh"{% if state.running %} disabled{% endif %}>Refresh now</button></form>
+</div>
+{% endmacro %}
+
+{% macro tiles(items) %}
+<div class="tiles">{% for t in items %}
+  <div class="tile"><div class="k">{{ t.label }}</div>
+    <div class="v{{ ' none' if t.missing }}">{{ t.value }}</div>
+    <div class="d">{% if t.delta %}<b class="{{ 'up' if t.up else 'down' }}">{{ '▲' if t.up else '▼' }} {{ t.delta }}</b> vs the {{ 'week' if rng == 7 else rng ~ ' days' }} before{% elif t.missing %}Not available{% else %}No earlier numbers to compare{% endif %}</div>
+  </div>{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro line_chart(c, name, color) %}
+{% if c.empty %}<div class="nodata">No {{ name|lower }} from Facebook for these days yet.</div>{% else %}
+<div class="chart" data-kind="line" data-points='{{ c.points|tojson }}' tabindex="0" style="--c:var({{ color }})"
+     role="img" aria-label="{{ name }} per day. Use the left and right arrow keys to read each day.">
+  <div class="yax" aria-hidden="true">{% for t, pct in c.ticks %}<span style="bottom:{{ pct }}%">{{ t }}</span>{% endfor %}</div>
+  <div class="plot">
+    <svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
+      {% for t, pct in c.ticks %}<line x1="0" x2="1000" y1="{{ 300 - pct * 3 }}" y2="{{ 300 - pct * 3 }}" class="grid{{ ' base' if pct == 0 }}"/>{% endfor %}
+      <path d="{{ c.area }}" class="area"/><path d="{{ c.line }}" class="ln"/>
+    </svg>
+    {% if c.end %}<i class="dot" style="left:{{ c.end.x }}%;top:{{ c.end.y }}%"></i>{% endif %}
+    <div class="xh" hidden></div><div class="tip" hidden><b></b><span></span></div>
+  </div>
+  <div class="xax" aria-hidden="true">{% for l, pct in c.xt %}<span style="left:{{ pct }}%"{% if loop.last and pct > 85 %} class="lastx"{% endif %}>{{ l }}</span>{% endfor %}</div>
+</div>{% endif %}
+{% endmacro %}
+
+{% macro col_chart(c, name, color) %}
+<div class="chart" data-kind="col" data-points='{{ c.points|tojson }}' tabindex="0" style="--c:var({{ color }})"
+     role="img" aria-label="{{ name }} per day. Use the left and right arrow keys to read each day.">
+  <div class="yax" aria-hidden="true">{% for t, pct in c.ticks %}<span style="bottom:{{ pct }}%">{{ t }}</span>{% endfor %}</div>
+  <div class="plot">
+    <svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
+      {% for t, pct in c.ticks %}<line x1="0" x2="1000" y1="{{ 300 - pct * 3 }}" y2="{{ 300 - pct * 3 }}" class="grid{{ ' base' if pct == 0 }}"/>{% endfor %}
+    </svg>
+    <div class="cols" aria-hidden="true">{% for b in c.bars %}<span><i style="height:{{ b.h }}%"></i></span>{% endfor %}</div>
+    <div class="xh" hidden></div><div class="tip" hidden><b></b><span></span></div>
+  </div>
+  <div class="xax" aria-hidden="true">{% for l, pct in c.xt %}<span style="left:{{ pct }}%"{% if loop.last and pct > 85 %} class="lastx"{% endif %}>{{ l }}</span>{% endfor %}</div>
+</div>
+{% endmacro %}
+
+{% macro day_table(rows, has_earn) %}
+<details class="tbl"><summary>Show as a table</summary>
+  <div class="scroll" style="max-height:320px;overflow-y:auto;margin-top:8px"><table>
+    <tr><th>Day</th><th class="n">Views</th>{% if has_earn %}<th class="n">Earnings</th>{% endif %}</tr>
+    {% for d, v, e in rows|reverse %}<tr><td>{{ d }}</td><td class="n">{{ v }}</td>{% if has_earn %}<td class="n">{{ e }}</td>{% endif %}</tr>{% endfor %}
+  </table></div>
+</details>
+{% endmacro %}
+
+{% macro script(running) %}
+<script>
+(function(){
+  Array.prototype.forEach.call(document.querySelectorAll('.an .chart'),function(ch){
+    var pts=JSON.parse(ch.getAttribute('data-points')||'[]'),n=pts.length,kind=ch.getAttribute('data-kind');
+    var plot=ch.querySelector('.plot'),xh=ch.querySelector('.xh'),tip=ch.querySelector('.tip'),bars=ch.querySelectorAll('.cols span'),idx=-1;
+    if(!n)return;
+    function show(i){
+      idx=Math.max(0,Math.min(n-1,i));
+      var f=kind==='line'?(n>1?idx/(n-1):.5):(idx+.5)/n,w=plot.clientWidth;
+      xh.style.left=(f*100)+'%';xh.hidden=false;
+      tip.querySelector('b').textContent=pts[idx].v;tip.querySelector('span').textContent=pts[idx].d;tip.hidden=false;
+      var tw=tip.offsetWidth;tip.style.left=Math.max(0,Math.min(w-tw,f*w-tw/2))+'px';
+      Array.prototype.forEach.call(bars,function(b,j){b.classList.toggle('on',j===idx);});
+    }
+    function hide(){xh.hidden=true;tip.hidden=true;idx=-1;Array.prototype.forEach.call(bars,function(b){b.classList.remove('on');});}
+    plot.addEventListener('pointermove',function(e){var r=plot.getBoundingClientRect(),f=(e.clientX-r.left)/r.width;show(kind==='line'?Math.round(f*(n-1)):Math.floor(f*n));});
+    plot.addEventListener('pointerleave',function(){if(document.activeElement!==ch)hide();});
+    ch.addEventListener('focus',function(){show(n-1);});
+    ch.addEventListener('blur',hide);
+    ch.addEventListener('keydown',function(e){
+      var k={ArrowLeft:idx-1,ArrowRight:idx+1,Home:0,End:n-1}[e.key];
+      if(k!==undefined){e.preventDefault();show(k);}
+    });
+  });
+  {% if running %}
+  var upd=document.getElementById('an-upd');
+  (function poll(){
+    fetch('/api/analytics/state',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(s){
+      if(s.running){upd.textContent='Getting numbers from Facebook, '+s.done+' of '+s.total+' Pages done';setTimeout(poll,3000);}
+      else{location.reload();}
+    }).catch(function(){setTimeout(poll,6000);});
+  })();
+  {% endif %}
+})();
+</script>
+{% endmacro %}

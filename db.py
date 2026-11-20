@@ -2,7 +2,8 @@
 import datetime as dt
 import os
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, func, inspect, select, text
+from sqlalchemy import (BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, func,
+                        inspect, select, text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -75,6 +76,51 @@ class Post(Base):
     error: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
     sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class StatDay(Base):
+    """One day of a Page's insights from Facebook (our copy, refreshed every few hours)."""
+    __tablename__ = "stat_days"
+    __table_args__ = (UniqueConstraint("page_id", "day"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    page_id: Mapped[int] = mapped_column(Integer, index=True)
+    day: Mapped[str] = mapped_column(String(10))               # YYYY-MM-DD, Facebook's day
+    views: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    viewers: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    video_views: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    engagements: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    follows: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    earn_micros: Mapped[int | None] = mapped_column(BigInteger, nullable=True)   # 1,000,000 = 1.00
+    currency: Mapped[str] = mapped_column(String(3), default="")
+
+
+class PageHealth(Base):
+    """A Page's standing with Facebook (violations, restrictions) and what we could or couldn't read."""
+    __tablename__ = "page_health"
+    page_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), default="")     # ok / warning / restricted / suspended; "" = unknown
+    detail: Mapped[str] = mapped_column(Text, default="")           # JSON: violations, restrictions, recommended_actions
+    status_note: Mapped[str] = mapped_column(String(300), default="")
+    stats_note: Mapped[str] = mapped_column(String(300), default="")
+    earn_note: Mapped[str] = mapped_column(String(300), default="")
+    checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ReelStat(Base):
+    """Lifetime numbers for one Reel on a Page."""
+    __tablename__ = "reel_stats"
+    video_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    page_id: Mapped[int] = mapped_column(Integer, index=True)
+    title: Mapped[str] = mapped_column(String(300), default="")
+    url: Mapped[str] = mapped_column(String(400), default="")
+    created: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    plays: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reach: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    avg_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    likes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    social: Mapped[int | None] = mapped_column(BigInteger, nullable=True)    # comments + shares
+    follows: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
@@ -254,3 +300,73 @@ def clear_finished() -> int:
     with Session.begin() as s:
         r = s.execute(delete(Post).where(Post.status.in_(("failed", "canceled", "posted"))))
         return r.rowcount or 0
+
+
+# ---------- analytics ----------
+STAT_FIELDS = ("views", "viewers", "video_views", "engagements", "follows", "earn_micros", "currency")
+
+
+def save_stat_days(page_id: int, days: dict) -> None:
+    """days: {'YYYY-MM-DD': {field: value}}; only the fields given are changed."""
+    if not days:
+        return
+    with Session.begin() as s:
+        have = {r.day: r for r in s.scalars(select(StatDay).where(StatDay.page_id == page_id, StatDay.day.in_(list(days))))}
+        for day, vals in days.items():
+            row = have.get(day)
+            if row is None:
+                row = StatDay(page_id=page_id, day=day)
+                s.add(row)
+            for k, v in vals.items():
+                if k in STAT_FIELDS:
+                    setattr(row, k, v)
+
+
+def stat_days(page_ids: list, first_day: str) -> list:
+    if not page_ids:
+        return []
+    with Session() as s:
+        q = select(StatDay).where(StatDay.page_id.in_(page_ids), StatDay.day >= first_day).order_by(StatDay.day)
+        return list(s.scalars(q))
+
+
+def latest_stat_day(page_ids: list) -> str:
+    if not page_ids:
+        return ""
+    with Session() as s:
+        return s.scalar(select(func.max(StatDay.day)).where(StatDay.page_id.in_(page_ids),
+                                                            StatDay.views.is_not(None))) or ""
+
+
+def save_health(page_id: int, **kw) -> None:
+    with Session.begin() as s:
+        row = s.get(PageHealth, page_id)
+        if row is None:
+            row = PageHealth(page_id=page_id)
+            s.add(row)
+        for k, v in kw.items():
+            setattr(row, k, v)
+
+
+def health_all() -> dict:
+    with Session() as s:
+        return {h.page_id: h for h in s.scalars(select(PageHealth))}
+
+
+def save_reels(page_id: int, rows: list) -> None:
+    if not rows:
+        return
+    with Session.begin() as s:
+        for r in rows:
+            row = s.get(ReelStat, r["video_id"])
+            if row is None:
+                row = ReelStat(video_id=r["video_id"], page_id=page_id)
+                s.add(row)
+            for k, v in r.items():
+                setattr(row, k, v)
+
+
+def reels_for(page_id: int, limit: int = 25) -> list:
+    with Session() as s:
+        q = select(ReelStat).where(ReelStat.page_id == page_id).order_by(ReelStat.created.desc()).limit(limit)
+        return list(s.scalars(q))

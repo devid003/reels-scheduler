@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% import "_analytics.html" as an with context %}
+{% block title %}{{ p.name }} · Analytics{% endblock %}
+{% block head %}{{ an.styles() }}
+<style>
+.an .back{display:inline-block;color:var(--muted);text-decoration:none;font-size:13.5px;font-weight:600;margin:0 0 12px}
+.an .back:hover{color:var(--ink)}
+.an .who{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 6px}
+.an .who .av{width:48px;height:48px;font-size:18px}
+.an .who h1{margin:0}
+.an .hl{list-style:none;margin:0;padding:0}
+.an .hl li{padding:12px 0;border-top:1px solid var(--line)}
+.an .hl li:first-child{border-top:0;padding-top:0}
+.an .hl b{display:block;font-size:14.5px}
+.an .hl p{margin:3px 0 0;color:var(--soft);font-size:13.5px}
+.an .hl .meta{color:var(--muted);font-size:12.5px;margin-top:3px}
+.an .ok-line{display:flex;gap:10px;align-items:flex-start;color:var(--soft);font-size:14px}
+.an .reel{max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an .reel a{color:var(--ink);text-decoration:none}
+.an .reel a:hover{text-decoration:underline}
+</style>{% endblock %}
+{% block body %}
+<main class="wrap an">
+  <a class="back" href="/analytics?range={{ rng }}">All Pages</a>
+  <div class="who">
+    {% if p.picture %}<img class="av" src="{{ p.picture }}" alt="" data-l="{{ p.name[:1] }}">{% else %}<span class="av ph" aria-hidden="true">{{ p.name[:1] }}</span>{% endif %}
+    <h1>{{ p.name }}</h1>
+    <span class="badge {{ row.health.cls }}"><span aria-hidden="true">{{ row.health.icon }}</span>{{ row.health.label }}</span>
+    <a class="btn sm" href="https://www.facebook.com/{{ p.fb_page_id }}" target="_blank" rel="noopener">Open on Facebook</a>
+  </div>
+  <p class="lead">{{ first }} to {{ last }}.{% if row.note %} <span style="color:var(--warn)">{{ row.note }}</span>{% endif %}</p>
+  {{ an.toprow(rng, ranges, state, updated, "/analytics/page/" ~ p.id, "/analytics/page/" ~ p.id ~ "?range=" ~ rng) }}
+  {% if state.running and views_chart.empty and not has_earn and not reels %}
+  <section class="panel"><div class="empty">Getting this Page's numbers from Facebook. The page updates by itself when it's done.</div></section>
+  {% else %}
+  {{ an.tiles(tiles) }}
+  <div class="grid2">
+    <section class="panel"><div class="panel-h"><div><h2>Views per day</h2></div></div>
+      <div class="panel-b">{{ an.line_chart(views_chart, "Views", "--views") }}{% if not views_chart.empty %}{{ an.day_table(table_days, has_earn) }}{% endif %}</div></section>
+    <section class="panel"><div class="panel-h"><div><h2>Earnings per day</h2><p>Facebook's estimate</p></div></div>
+      <div class="panel-b">{% if has_earn %}{{ an.col_chart(earn_chart, "Earnings", "--earn") }}{% else %}<div class="nodata">{{ row.earn_note or "No earnings to show for these days." }}</div>{% endif %}</div></section>
+  </div>
+
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-h"><div><h2>Page status</h2><p>From Facebook's Page integrity check</p></div></div>
+    <div class="panel-b">
+      {% set h = row.health %}
+      {% if h.note %}<p class="ok-line" style="color:var(--warn)">{{ h.note }}</p>
+      {% elif h.status == 'ok' and not h.violations and not h.restrictions %}<p class="ok-line"><span class="badge ok"><span aria-hidden="true">✓</span>OK</span><span>No violations or restrictions right now.</span></p>
+      {% else %}
+        {% if h.status == 'warning' %}<p class="ok-line">Not restricted yet, but Facebook may restrict this Page soon.</p>{% endif %}
+        {% if h.violations %}<h3 class="small" style="margin:6px 0 10px;color:var(--muted)">Violations</h3>
+        <ul class="hl">{% for v in h.violations %}<li><b>{{ v.type or "Violation" }}</b>{% if v.text %}<p>{{ v.text }}</p>{% endif %}{% if v.url %}<div class="meta"><a href="{{ v.url }}" target="_blank" rel="noopener">Read the policy</a></div>{% endif %}</li>{% endfor %}</ul>{% endif %}
+        {% if h.restrictions %}<h3 class="small" style="margin:16px 0 10px;color:var(--muted)">Restrictions</h3>
+        <ul class="hl">{% for r in h.restrictions %}<li><b>{{ r.what }}</b>{% if r.text %}<p>{{ r.text }}</p>{% endif %}<div class="meta">{% if r.since %}Since {{ r.since }}{% endif %}{% if r.until %} · Ends {{ r.until }}{% endif %}</div></li>{% endfor %}</ul>{% endif %}
+        {% if h.actions %}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">{% for a in h.actions %}{% if a.url %}<a class="btn sm" href="{{ a.url }}" target="_blank" rel="noopener">{{ a.text }}</a>{% endif %}{% endfor %}</div>{% endif %}
+        {% if not h.status %}<p class="ok-line">Not checked yet.</p>{% endif %}
+      {% endif %}
+      <p class="foot" style="margin:14px 0 0">Facebook doesn't tell apps whether this Page can be recommended. To see that, use Open on Facebook, then Professional dashboard, then Account status.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-h"><div><h2>Latest Reels</h2><p>Lifetime numbers for the Page's 25 newest Reels</p></div></div>
+    <div class="panel-b" style="padding-top:8px">
+      {% if reels %}<div class="scroll"><table>
+        <tr><th>Reel</th><th>Posted</th><th class="n">Plays</th><th class="n">Reached</th><th class="n">Avg. watch</th><th class="n">Likes</th><th class="n">Comments + shares</th><th class="n">Follows</th></tr>
+        {% for r in reels %}<tr>
+          <td class="reel">{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener" title="{{ r.title }}">{{ r.title }}</a>{% else %}{{ r.title }}{% endif %}</td>
+          <td style="white-space:nowrap">{{ r.when }}</td><td class="n">{{ r.plays }}</td><td class="n">{{ r.reach }}</td><td class="n">{{ r.avg }}</td>
+          <td class="n">{{ r.likes }}</td><td class="n">{{ r.social }}</td><td class="n">{{ r.follows }}</td></tr>{% endfor %}
+      </table></div>
+      {% else %}<div class="empty">No Reels yet{% if state.running %}, or still getting them from Facebook{% endif %}.</div>{% endif %}
+    </div>
+  </section>
+  {% endif %}
+</main>
+{{ an.script(state.running) }}
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% import "_analytics.html" as an with context %}
+{% block title %}Analytics · Reels Scheduler{% endblock %}
+{% block head %}{{ an.styles() }}{% endblock %}
+{% block body %}
+<main class="wrap an">
+  <h1>Analytics</h1>
+  <p class="lead">Views, earnings and standing of your connected Pages, from Facebook. {{ first }} to {{ last }}.</p>
+  {% if not has_pages %}
+  <section class="panel"><div class="empty">Connect a Facebook account on the Pages tab to see analytics here.<br><br><a class="btn primary" href="/pages">Go to Pages</a></div></section>
+  {% else %}
+  {{ an.toprow(rng, ranges, state, updated, "/analytics", "/analytics?range=" ~ rng) }}
+  {% if state.running and views_chart.empty and not has_earn %}
+  <section class="panel"><div class="empty">Getting your numbers from Facebook for the first time. This takes about a minute for every 10 Pages, and the page updates by itself when it's done.</div></section>
+  {% else %}
+  {{ an.tiles(tiles) }}
+  <div class="grid2">
+    <section class="panel"><div class="panel-h"><div><h2>Views per day</h2><p>All Pages added together</p></div></div>
+      <div class="panel-b">{{ an.line_chart(views_chart, "Views", "--views") }}{% if not views_chart.empty %}{{ an.day_table(table_days, has_earn) }}{% endif %}</div></section>
+    <section class="panel"><div class="panel-h"><div><h2>Earnings per day</h2><p>Facebook's estimate for monetized Pages</p></div></div>
+      <div class="panel-b">{% if has_earn %}{{ an.col_chart(earn_chart, "Earnings", "--earn") }}{% else %}<div class="nodata">No earnings to show. Facebook only shares earnings for Pages in its content monetization program, and only with the Page's admins.</div>{% endif %}</div></section>
+  </div>
+  <section class="panel">
+    <div class="panel-h"><div><h2>Pages</h2><p>Open a Page for its Reels, violations and day-by-day numbers.</p></div></div>
+    <div class="panel-b" style="padding-top:8px"><div class="scroll"><table>
+      <tr><th>Page</th><th>Status</th><th class="n">Views</th><th class="n">Engagements</th><th class="n">New followers</th><th class="n">Earnings</th></tr>
+      {% for r in rows %}
+      <tr>
+        <td><div class="pname">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="" data-l="{{ r.name[:1] }}">{% else %}<span class="av ph" aria-hidden="true">{{ r.name[:1] }}</span>{% endif %}
+          <div><a href="/analytics/page/{{ r.id }}?range={{ rng }}">{{ r.name }}</a>{% if r.short_note %}<div class="note">{{ r.short_note }} Open the Page to fix it.</div>{% endif %}</div></div></td>
+        <td><span class="badge {{ r.health.cls }}" title="{{ r.health.note }}"><span aria-hidden="true">{{ r.health.icon }}</span>{{ r.health.label }}</span>
+          {% if r.health.violations %}<div class="small muted" style="margin-top:4px">{{ r.health.violations|length }} violation{{ 's' if r.health.violations|length > 1 }}</div>{% endif %}</td>
+        <td class="n"><div class="vcell">{% if r.spark %}<svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points="{{ r.spark }}"/></svg>{% endif %}{{ r.views }}</div></td>
+        <td class="n">{{ r.engagements }}</td>
+        <td class="n">{{ r.follows }}</td>
+        <td class="n" title="{{ r.earn_note }}">{{ r.earnings }}</td>
+      </tr>
+      {% endfor %}
+    </table></div></div>
+  </section>
+  {% endif %}
+  <p class="foot">Status comes from Facebook's Page integrity check: OK, Warning, Restricted or Suspended, with any violations. Facebook doesn't tell apps whether a Page can be recommended. To see that, open the Page on Facebook and go to Professional dashboard, then Account status. New numbers usually show up on Facebook a day or two late.</p>
+  {% endif %}
+</main>
+{{ an.script(state.running) }}
+{% endblock %}

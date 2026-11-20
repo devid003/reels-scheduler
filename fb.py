@@ -1,5 +1,6 @@
-"""Small Facebook Graph API client: connect accounts, list Pages, upload and schedule Reels."""
+"""Small Facebook Graph API client: connect accounts, list Pages, upload and schedule Reels, read insights."""
 import asyncio
+import datetime as dt
 import os
 
 import aiohttp
@@ -7,7 +8,7 @@ import aiohttp
 VERSION = os.getenv("FB_API_VERSION", "").strip().strip("/")       # blank = your app's own version
 GRAPH = os.getenv("FB_GRAPH_URL", "https://graph.facebook.com").rstrip("/") + (f"/{VERSION}" if VERSION else "")
 DIALOG = os.getenv("FB_DIALOG_URL", "https://www.facebook.com").rstrip("/") + (f"/{VERSION}" if VERSION else "") + "/dialog/oauth"
-SCOPES = "pages_show_list,pages_read_engagement,pages_manage_posts"
+SCOPES = "pages_show_list,pages_read_engagement,pages_manage_posts,read_insights,pages_manage_metadata,pages_manage_engagement"
 
 
 class FBError(Exception):
@@ -144,3 +145,54 @@ async def video_status(video_id: str, token: str) -> dict:
 
 async def delete_video(video_id: str, token: str) -> None:
     await _call("DELETE", video_id, {"access_token": token})
+
+
+# ---------- analytics ----------
+REEL_METRICS = ("blue_reels_play_count", "post_impressions_unique", "post_video_avg_time_watched",
+                "post_video_likes_by_reaction_type", "post_video_social_actions", "post_video_followers")
+
+
+async def page_insight(page_id: str, token: str, metric: str, since: str, until: str) -> dict:
+    """One daily Page metric: {'YYYY-MM-DD': value}. Facebook marks each day by its end, so step back a day."""
+    r = await _call("GET", f"{page_id}/insights", {"metric": metric, "period": "day", "since": since, "until": until,
+                                                  "access_token": token})
+    out = {}
+    for item in r.get("data", []):
+        for v in item.get("values", []) or []:
+            try:
+                end = dt.datetime.fromisoformat(str(v.get("end_time", ""))[:19])
+            except ValueError:
+                continue
+            out[(end - dt.timedelta(days=1)).date().isoformat()] = v.get("value")
+    return out
+
+
+async def page_status(page_id: str, token: str) -> dict:
+    """Violations, restrictions and recommended actions (needs pages_manage_metadata)."""
+    return await _call("GET", f"{page_id}/page_status", {"access_token": token})
+
+
+async def page_reels(page_id: str, token: str, limit: int = 25) -> list:
+    r = await _call("GET", f"{page_id}/video_reels", {"fields": "id,description,created_time,permalink_url",
+                                                      "limit": limit, "access_token": token})
+    return r.get("data", []) or []
+
+
+async def reel_insights(video_id: str, token: str) -> dict:
+    """Lifetime Reel numbers: {metric: value}. Metrics Facebook won't give for this Reel are left out."""
+    def pick(r):
+        return {i.get("name"): ((i.get("values") or [{}])[0] or {}).get("value") for i in r.get("data", []) or []}
+    try:
+        return pick(await _call("GET", f"{video_id}/video_insights", {"metric": ",".join(REEL_METRICS),
+                                                                     "access_token": token}))
+    except FBError as e:
+        if e.code != 100:
+            raise
+    out = {}
+    for m in REEL_METRICS:              # one of them was refused: ask one by one and keep the rest
+        try:
+            out.update(pick(await _call("GET", f"{video_id}/video_insights", {"metric": m, "access_token": token})))
+        except FBError as e:
+            if e.code != 100:
+                raise
+    return out

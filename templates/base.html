@@ -73,6 +73,7 @@ form.inline{display:inline}
   <nav class="tabs" aria-label="Sections">
     <a href="/"{% if nav == '/' %} aria-current="page"{% endif %}>Queue</a>
     <a href="/pages"{% if nav == '/pages' %} aria-current="page"{% endif %}>Pages</a>
+    <a href="/analytics"{% if nav.startswith('/analytics') %} aria-current="page"{% endif %}>Analytics</a>
   </nav>
   <span class="sp"></span>
   <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn sm">Log out</button></form>

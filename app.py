@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -728,6 +729,477 @@ async def deletion_page(request):
 
 
 # ---------- security headers ----------
+# ---------- analytics ----------
+STAT_METRICS = {"views": "page_media_view", "viewers": "page_total_media_view_unique",
+                "video_views": "page_video_views", "engagements": "page_post_engagements",
+                "follows": "page_daily_follows_unique"}
+EARN_METRIC = "content_monetization_earnings"
+STALE = dt.timedelta(hours=6)         # numbers older than this refresh by themselves when you open Analytics
+RANGES = (7, 28, 90)
+ANALYTICS = {"running": False, "done": 0, "total": 0, "page": "", "error": ""}
+STATUS = {"ok": ("ok", "✓", "OK"), "warning": ("time", "!", "Warning"), "restricted": ("bad", "✕", "Restricted"),
+          "suspended": ("bad", "✕", "Suspended"), "": ("", "?", "Unknown")}
+RESTRICTION_TEXT = {"page_publish": "Page is unpublished", "page_read_only": "Can't post or make changes",
+                    "page_messaging": "Can't send messages", "page_messaging_api": "Can't send messages from apps"}
+MINUS = "\u2212"
+CURRENCY_SIGN = {"USD": "$", "PHP": "₱", "EUR": "€", "GBP": "£", "JPY": "¥"}
+
+
+def _num(v) -> int | None:
+    """An insight value as a whole number. Breakdowns (per reaction, comments + shares) are added up."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        try:
+            return int(float(v))
+        except ValueError:
+            return None
+    parts = [_num(x) for x in (v.values() if isinstance(v, dict) else v if isinstance(v, list) else [])]
+    parts = [x for x in parts if x is not None]
+    return sum(parts) if parts else None
+
+
+def _money(v) -> tuple:
+    """An earnings value as (micros, currency); 1,000,000 micros = 1.00. Facebook sends a number or an object
+    like {"currency": "USD", "micro_amount": 1234567}; a breakdown by content type is added up."""
+    if isinstance(v, bool) or v is None:
+        return None, ""
+    if isinstance(v, (int, float)):
+        return round(v * 1_000_000), ""
+    if isinstance(v, str):
+        try:
+            return round(float(v) * 1_000_000), ""
+        except ValueError:
+            return None, ""
+    if isinstance(v, dict):
+        cur = str(v.get("currency") or "")[:3].upper()
+        for k in ("micro_amount", "amount_micros", "micros"):
+            if isinstance(v.get(k), (int, float, str)) and not isinstance(v.get(k), bool):
+                try:
+                    return int(float(v[k])), cur
+                except ValueError:
+                    pass
+        for k in ("total", "amount", "value"):
+            if k in v:
+                m, c = _money(v[k])
+                if m is not None:
+                    return m, c or cur
+        items = list(v.values())
+    elif isinstance(v, list):
+        cur, items = "", v
+    else:
+        return None, ""
+    total, seen = 0, False
+    for x in items:
+        if isinstance(x, (dict, list)):
+            m, c = _money(x)
+            if m is not None:
+                total, seen, cur = total + m, True, cur or c
+    return (total, cur) if seen else (None, cur)
+
+
+def _fb_time(s) -> dt.datetime | None:
+    try:
+        t = dt.datetime.fromisoformat(str(s).replace("+0000", "+00:00"))
+    except ValueError:
+        return None
+    return t.astimezone(dt.timezone.utc).replace(tzinfo=None) if t.tzinfo else t
+
+
+def _slow_down(e: fb.FBError) -> bool:
+    return e.code in (4, 17, 32, 613) or "rate limit" in e.message.lower()
+
+
+def _no_permission(e: fb.FBError) -> bool:
+    return e.code in (10, 200, 283) or (e.code == 100 and "permission" in e.message.lower())
+
+
+def _bad_metric(e: fb.FBError) -> bool:
+    return e.code == 100 and "metric" in e.message.lower() and "permission" not in e.message.lower()
+
+
+def _why(e: fb.FBError, perm: str) -> str:
+    if e.token_bad:
+        return "Facebook logged this account out. Reconnect it on the Pages tab."
+    if _no_permission(e):
+        return (f"Facebook needs the {perm} permission. Add it to your Facebook Login setup in Meta, "
+                "then connect this account again on the Pages tab.")
+    return "Facebook said: " + e.message[:200]
+
+
+async def _reel_row(r: dict, token: str) -> tuple:
+    vid = str(r.get("id") or "")
+    note, ins = "", {}
+    try:
+        ins = await fb.reel_insights(vid, token)
+    except fb.FBError as e:
+        if _slow_down(e):
+            raise
+        note = _why(e, "read_insights")
+    url = str(r.get("permalink_url") or "")
+    if url.startswith("/"):
+        url = "https://www.facebook.com" + url
+    return {"video_id": vid, "title": " ".join(str(r.get("description") or "").split())[:300], "url": url[:400],
+            "created": _fb_time(r.get("created_time")), "plays": _num(ins.get("blue_reels_play_count")),
+            "reach": _num(ins.get("post_impressions_unique")), "avg_ms": _num(ins.get("post_video_avg_time_watched")),
+            "likes": _num(ins.get("post_video_likes_by_reaction_type")),
+            "social": _num(ins.get("post_video_social_actions")), "follows": _num(ins.get("post_video_followers")),
+            "checked_at": db.utcnow()}, note
+
+
+async def _refresh_page(p) -> None:
+    """Fetch one Page's last 90 days, its standing with Facebook, and its latest Reels."""
+    token = dec(p.token_enc)
+    today = dt.datetime.now(dt.timezone.utc).date()
+    since, until = (today - dt.timedelta(days=90)).isoformat(), (today + dt.timedelta(days=1)).isoformat()
+    days, stats_note = {}, ""
+    for field, metric in STAT_METRICS.items():
+        try:
+            got = await fb.page_insight(p.fb_page_id, token, metric, since, until)
+        except fb.FBError as e:
+            if _slow_down(e):
+                raise
+            if _bad_metric(e):
+                continue                # Facebook doesn't offer this number (any more); show the rest
+            stats_note = _why(e, "read_insights")
+            break
+        for day, v in got.items():
+            days.setdefault(day, {})[field] = _num(v)
+    earn_note = ""
+    if not stats_note:
+        try:
+            got = await fb.page_insight(p.fb_page_id, token, EARN_METRIC, since, until)
+            for day, v in got.items():
+                m, cur = _money(v)
+                if m is not None:
+                    days.setdefault(day, {}).update(earn_micros=m, currency=cur)
+            if not got:
+                earn_note = "No earnings yet. The Page may not be in Facebook's content monetization program."
+        except fb.FBError as e:
+            if _slow_down(e):
+                raise
+            earn_note = (_why(e, "read_insights") if e.token_bad else
+                         "Earnings aren't available. The Page may not be monetized, or this account isn't its admin.")
+    await run(db.save_stat_days, p.id, days)
+    health = {"status": "", "detail": "", "status_note": ""}
+    try:
+        st = await fb.page_status(p.fb_page_id, token)
+        health["status"] = str(st.get("status") or "").lower()[:20]
+        health["detail"] = json.dumps({k: st.get(k) or [] for k in ("violations", "restrictions", "recommended_actions")})
+    except fb.FBError as e:
+        if _slow_down(e):
+            raise
+        health["status_note"] = _why(e, "pages_manage_metadata")
+    reels, reel_note = [], ""
+    try:
+        listed = [r for r in (await fb.page_reels(p.fb_page_id, token))[:25] if r.get("id")]
+        for i in range(0, len(listed), 5):          # a few at a time
+            for row, note in await asyncio.gather(*(_reel_row(r, token) for r in listed[i:i + 5])):
+                reels.append(row)
+                reel_note = reel_note or note
+    except fb.FBError as e:
+        if _slow_down(e):
+            raise
+        reel_note = _why(e, "pages_read_engagement")
+    await run(db.save_reels, p.id, reels)
+    await run(db.save_health, p.id, stats_note=stats_note or reel_note, earn_note=earn_note,
+              checked_at=db.utcnow(), **health)
+
+
+def _analytics_pages(pages: list) -> list:
+    return [p for p in pages if not p.gone and p.token_enc]
+
+
+async def _refresh_all(pages: list) -> None:
+    try:
+        for p in pages:
+            ANALYTICS["page"] = p.name
+            try:
+                await _refresh_page(p)
+            except fb.FBError as e:
+                if _slow_down(e):
+                    ANALYTICS["error"] = "Facebook asked to slow down. The rest will update in about an hour."
+                    break
+                log.warning("Analytics for %s failed: %s", p.name, e.message)
+            except Exception:
+                log.exception("Analytics for %s failed", p.name)
+            ANALYTICS["done"] += 1
+        await run(db.set_setting, "analytics_at", db.utcnow().isoformat())
+    finally:
+        ANALYTICS.update(running=False, page="")
+
+
+def _start_refresh(pages: list) -> None:
+    """Start fetching fresh numbers in the background (one run at a time)."""
+    if not pages or ANALYTICS["running"]:
+        return
+    ANALYTICS.update(running=True, done=0, total=len(pages), page="", error="")
+    spawn(_refresh_all(pages))
+
+
+async def _refresh_if_old(pages: list) -> None:
+    at = await run(db.get_setting, "analytics_at", "")
+    try:
+        old = db.utcnow() - dt.datetime.fromisoformat(at) > STALE
+    except ValueError:
+        old = True
+    if old:
+        _start_refresh(_analytics_pages(await run(db.list_pages)) if len(pages) == 1 else pages)
+
+
+def _fmt_n(n) -> str:
+    if n is None:
+        return "–"
+    n = int(n)
+    if abs(n) < 10_000:
+        return f"{n:,}"
+    if abs(n) < 1_000_000:
+        return f"{n / 1000:.1f}K".replace(".0K", "K")
+    return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
+
+
+def _fmt_money(micros, cur: str = "") -> str:
+    if micros is None:
+        return "–"
+    amount = micros / 1_000_000
+    sign = CURRENCY_SIGN.get(cur, (cur + " ") if cur else "")
+    return f"-{sign}{abs(amount):,.2f}" if amount < 0 else f"{sign}{amount:,.2f}"
+
+
+def _fmt_ms(ms) -> str:
+    return "–" if ms is None else f"{ms / 1000:.1f}s"
+
+
+def _nice_step(v: float) -> float:
+    """The smallest of 1, 2, 2.5, 5 x 10^n that is at least v."""
+    if v <= 0:
+        return 1
+    p = 10 ** math.floor(math.log10(v))
+    return next(m * p for m in (1, 2, 2.5, 5, 10) if v <= m * p)
+
+
+def _chart(days: list, values: list, money: bool = False, cur: str = "") -> dict:
+    """Shapes for an SVG chart in a 1000 x 300 box, plus ticks and per-day readouts (no drawing library)."""
+    have = [v for v in values if v is not None]
+    peak = max(have) if have else 0
+    step = _nice_step(peak / 4) if peak > 0 else (1_000_000 if money else 1)
+    if money and step < 10_000:
+        step = 10_000                                   # never finer than one cent
+    if not money:
+        step = max(1, round(step))
+    count = max(1, math.ceil(peak / step)) if peak > 0 else 4
+    top = step * count
+    compact = (not money) and top >= 10_000
+
+    def axis(v):                                        # one style for the whole axis
+        if money:
+            return _fmt_money(round(v), cur)
+        if not compact or v == 0:
+            return f"{int(v):,}"
+        return f"{v / 1_000_000:g}M" if top >= 1_000_000 else f"{v / 1000:g}K"
+
+    def full(v):
+        return _fmt_money(v, cur) if money else f"{int(v):,}"
+    n = len(days)
+    xs = [(i * 1000 / (n - 1)) if n > 1 else 500 for i in range(n)]
+    pts = [(xs[i], 300 - v / top * 300) for i, v in enumerate(values) if v is not None]
+    line = ("M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pts)) if pts else ""
+    area = (line + f" L{pts[-1][0]:.1f},300 L{pts[0][0]:.1f},300 Z") if pts else ""
+    every = max(1, round(n / 5))
+    xt = [(_day_label(days[i]), xs[i] / 10) for i in range(0, n, every)] if n else []
+    last = next(((i, v) for i, v in reversed(list(enumerate(values))) if v is not None), None)
+    return {
+        "line": line, "area": area, "empty": not have,
+        "ticks": [(axis(step * k), k * 100 / count) for k in range(count + 1)],
+        "xt": xt,
+        "bars": [{"h": 0 if v is None else max(0, v) / top * 100} for v in values],
+        "points": [{"d": _day_label(d, True), "v": "No data" if v is None else full(v)} for d, v in zip(days, values)],
+        "end": ({"x": xs[last[0]] / 10, "y": 100 - last[1] / top * 100} if last else None),
+    }
+
+
+def _day_label(day: str, full: bool = False) -> str:
+    d = dt.date.fromisoformat(day)
+    return (d.strftime("%a, %b ") + str(d.day) + d.strftime(", %Y")) if full else d.strftime("%b ") + str(d.day)
+
+
+def _spark(values: list) -> str:
+    have = [v for v in values if v is not None]
+    if len(have) < 2:
+        return ""
+    top, n = max(max(have), 1), len(values)
+    return " ".join(f"{i * 100 / (n - 1):.1f},{30 - v / top * 28 - 1:.1f}" for i, v in enumerate(values) if v is not None)
+
+
+def _health(h) -> dict:
+    status = (h.status if h else "") or ""
+    cls, icon, label = STATUS.get(status, STATUS[""])
+    try:
+        d = json.loads(h.detail) if h and h.detail else {}
+    except ValueError:
+        d = {}
+    def when(ts):
+        try:
+            return local(dt.datetime.fromtimestamp(int(ts), dt.timezone.utc).replace(tzinfo=None)).strftime("%b %d, %Y %I:%M %p")
+        except (TypeError, ValueError, OverflowError, OSError):
+            return ""
+    return {
+        "status": status, "cls": cls, "icon": icon, "label": label, "note": (h.status_note if h else "") or "",
+        "violations": [{"type": str(v.get("type") or "").replace("_", " ").title(), "text": str(v.get("description") or ""),
+                        "url": str(v.get("url") or "")} for v in d.get("violations", []) if isinstance(v, dict)],
+        "restrictions": [{"what": RESTRICTION_TEXT.get(str(r.get("feature")), str(r.get("feature") or "").replace("_", " ")),
+                          "text": str(r.get("description") or ""), "since": when(r.get("applied_time")),
+                          "until": when(r.get("expiration_time"))} for r in d.get("restrictions", []) if isinstance(r, dict)],
+        "actions": [{"text": {"FILE_APPEAL": "File an appeal"}.get(str(a.get("action_type")), str(a.get("action_type") or "").replace("_", " ").capitalize()),
+                     "url": str(a.get("url") or "")} for a in d.get("recommended_actions", []) if isinstance(a, dict)],
+    }
+
+
+def _build_view(pages: list, rng: int) -> dict:
+    """Everything the Analytics pages show, from the saved numbers (no calls to Facebook here)."""
+    ids = [p.id for p in pages]
+    latest = db.latest_stat_day(ids)
+    end = dt.date.fromisoformat(latest) if latest else dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
+    days = [(end - dt.timedelta(days=rng - 1 - i)).isoformat() for i in range(rng)]
+    prev = [(end - dt.timedelta(days=2 * rng - 1 - i)).isoformat() for i in range(rng)]
+    rows = db.stat_days(ids, prev[0])
+    cell = {(r.page_id, r.day): r for r in rows}
+    curs = {}
+    for r in rows:
+        if r.earn_micros is not None and r.day >= days[0]:
+            curs[r.currency or ""] = curs.get(r.currency or "", 0) + abs(r.earn_micros)
+    cur = max(curs, key=curs.get) if curs else ""
+
+    def total(field, window, pid=None):
+        vals = [getattr(cell[(q, d)], field) for q in ([pid] if pid else ids) for d in window
+                if (q, d) in cell and getattr(cell[(q, d)], field) is not None
+                and (field != "earn_micros" or (cell[(q, d)].currency or "") == cur)]
+        return sum(vals) if vals else None
+
+    def daily(field, pid=None):
+        out = []
+        for d in days:
+            vals = [getattr(cell[(q, d)], field) for q in ([pid] if pid else ids)
+                    if (q, d) in cell and getattr(cell[(q, d)], field) is not None
+                    and (field != "earn_micros" or (cell[(q, d)].currency or "") == cur)]
+            out.append(sum(vals) if vals else None)
+        return out
+
+    def tiles(pid=None):
+        out = []
+        for key, label, money in (("views", "Views", False), ("video_views", "Video views", False),
+                                  ("engagements", "Engagements", False), ("follows", "New followers", False),
+                                  ("earn_micros", "Earnings", True)):
+            now, before = total(key, days, pid), total(key, prev, pid)
+            delta = None
+            if now is not None and before:
+                delta = (now - before) / abs(before) * 100
+            out.append({"label": label, "value": _fmt_money(now, cur) if money else _fmt_n(now), "missing": now is None,
+                        "delta": None if delta is None else f"{'+' if delta >= 0 else '−'}{abs(delta):.0f}%",
+                        "up": delta is not None and delta >= 0})
+        return out
+
+    health = db.health_all()
+    page_rows = []
+    for p in pages:
+        h = health.get(p.id)
+        page_rows.append({"id": p.id, "name": p.name, "pic": p.picture, "health": _health(h),
+                          "views": _fmt_n(total("views", days, p.id)), "engagements": _fmt_n(total("engagements", days, p.id)),
+                          "follows": _fmt_n(total("follows", days, p.id)),
+                          "earnings": _fmt_money(total("earn_micros", days, p.id), cur),
+                          "spark": _spark(daily("views", p.id)),
+                          "note": (h.stats_note if h else "") or "", "earn_note": (h.earn_note if h else "") or "",
+                          "short_note": ((h.stats_note if h else "") or "").split(". ")[0].rstrip(".") + "." if h and h.stats_note else "",
+                          "checked": h.checked_at if h else None})
+    return {"days": days, "cur": cur, "tiles": tiles, "total": total, "daily": daily, "page_rows": page_rows,
+            "health": health, "first": days[0], "last": days[-1]}
+
+
+def _range(request) -> int:
+    try:
+        r = int(request.query_params.get("range", "28"))
+    except ValueError:
+        r = 28
+    return r if r in RANGES else 28
+
+
+def _updated_text(at: str) -> str:
+    try:
+        mins = int((db.utcnow() - dt.datetime.fromisoformat(at)).total_seconds() // 60)
+    except ValueError:
+        return "not yet"
+    if mins < 1:
+        return "just now"
+    if mins < 60:
+        return f"{mins} min ago"
+    if mins < 48 * 60:
+        return f"{mins // 60} hr ago"
+    return f"{mins // 1440} days ago"
+
+
+async def analytics_page(request):
+    if not authed(request):
+        return redirect("/login")
+    rng = _range(request)
+    pages = _analytics_pages(await run(db.list_pages))
+    await _refresh_if_old(pages)
+    v = await run(_build_view, pages, rng)
+    views = v["daily"]("views")
+    earn = v["daily"]("earn_micros")
+    return page(request, "analytics.html", rng=rng, ranges=RANGES, state=ANALYTICS, has_pages=bool(pages),
+                updated=_updated_text(await run(db.get_setting, "analytics_at", "")), tiles=v["tiles"](),
+                views_chart=_chart(v["days"], views), earn_chart=_chart(v["days"], earn, True, v["cur"]),
+                has_earn=any(x is not None for x in earn), rows=v["page_rows"], first=_day_label(v["first"], True),
+                last=_day_label(v["last"], True), table_days=list(zip([_day_label(d, True) for d in v["days"]],
+                                                                       [_fmt_n(x) for x in views],
+                                                                       [_fmt_money(x, v["cur"]) for x in earn])))
+
+
+async def analytics_one(request):
+    if not authed(request):
+        return redirect("/login")
+    try:
+        pid = int(request.path_params["pid"])
+    except ValueError:
+        return redirect("/analytics")
+    p = await run(db.get_page, pid)
+    if p is None or p.gone or not p.token_enc:
+        flash(request, "That Page isn't connected anymore.")
+        return redirect("/analytics")
+    rng = _range(request)
+    await _refresh_if_old([p])
+    v = await run(_build_view, [p], rng)
+    views, earn = v["daily"]("views", p.id), v["daily"]("earn_micros", p.id)
+    reels = await run(db.reels_for, p.id)
+    row = v["page_rows"][0]
+    return page(request, "analytics_page.html", p=p, row=row, rng=rng, ranges=RANGES, state=ANALYTICS,
+                updated=_updated_text(await run(db.get_setting, "analytics_at", "")), tiles=v["tiles"](p.id),
+                views_chart=_chart(v["days"], views), earn_chart=_chart(v["days"], earn, True, v["cur"]),
+                has_earn=any(x is not None for x in earn), first=_day_label(v["first"], True), last=_day_label(v["last"], True),
+                table_days=list(zip([_day_label(d, True) for d in v["days"]], [_fmt_n(x) for x in views],
+                                    [_fmt_money(x, v["cur"]) for x in earn])),
+                reels=[{"title": r.title or "(no caption)", "url": r.url, "when": local(r.created).strftime("%b %d, %Y") if r.created else "",
+                        "plays": _fmt_n(r.plays), "reach": _fmt_n(r.reach), "avg": _fmt_ms(r.avg_ms), "likes": _fmt_n(r.likes),
+                        "social": _fmt_n(r.social), "follows": _fmt_n(r.follows)} for r in reels])
+
+
+async def analytics_refresh(request):
+    form, resp = await guarded_post(request)
+    if resp:
+        return resp
+    _start_refresh(_analytics_pages(await run(db.list_pages)))
+    back = str(form.get("back", "/analytics"))
+    return redirect(back if back.startswith("/analytics") else "/analytics")
+
+
+async def analytics_state(request):
+    if not authed(request):
+        return JSONResponse({"ok": False}, status_code=401)
+    return JSONResponse({"ok": True, **ANALYTICS})
+
+
 class SecurityHeaders:
     CSP = ("default-src 'self'; img-src 'self' data: blob: https://*.fbcdn.net https://*.fbsbx.com https://*.facebook.com; "
            "media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
@@ -790,6 +1262,10 @@ routes = [
     Route("/api/posts", posts_api),
     Route("/posts/cancel", post_cancel, methods=["POST"]),
     Route("/posts/clear", clear_history, methods=["POST"]),
+    Route("/analytics", analytics_page),
+    Route("/analytics/page/{pid}", analytics_one),
+    Route("/analytics/refresh", analytics_refresh, methods=["POST"]),
+    Route("/api/analytics/state", analytics_state),
     Route("/health", health),
     Route("/privacy", privacy_page),
     Route("/data-deletion", deletion_page),
