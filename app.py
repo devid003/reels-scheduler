@@ -46,6 +46,8 @@ DAILY_LIMIT = 30           # Facebook: 30 Reels per Page per 24 hours through ap
 LEAD_MIN = 20              # first free time must be at least this many minutes away
 MAX_DAYS = 28              # Facebook schedules Reels up to about a month ahead
 CAPTION_MAX = 2200
+MAX_THUMB = 8 * 1024 * 1024
+THUMB_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/jpg": ".jpg", "image/webp": ".webp"}
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
@@ -198,6 +200,15 @@ def next_free(page_slots: str, taken: set, count: int = 1, now: dt.datetime | No
                 if len(out) >= count:
                     return out
     return out
+
+
+def parse_local(text: str) -> dt.datetime | None:
+    """'2026-11-20T21:00' in the site's timezone -> UTC (naive), or None."""
+    try:
+        t = dt.datetime.strptime(str(text).strip()[:16], "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    return t.replace(tzinfo=TZ).astimezone(dt.timezone.utc).replace(tzinfo=None)
 
 
 def local(t: dt.datetime | None) -> dt.datetime | None:
@@ -356,6 +367,12 @@ def _cleanup_files(max_age: int = 3 * 3600) -> None:
                 os.remove(u["path"])
             except OSError:
                 pass
+            thumb = u.get("thumb")
+            if thumb:
+                try:
+                    os.remove(thumb["path"])
+                except OSError:
+                    pass
     try:
         for name in os.listdir(UPLOAD_DIR):
             path = os.path.join(UPLOAD_DIR, name)
@@ -411,6 +428,41 @@ async def upload_chunk(request):
     return JSONResponse({"ok": True, "have": have + got})
 
 
+async def upload_thumb(request):
+    """Optional custom cover photo for one uploaded video (small, single shot, no chunking needed)."""
+    if not api_ok(request):
+        return JSONResponse({"ok": False, "msg": "Log in again."}, status_code=401)
+    u = UPLOADS.get(request.path_params["uid"])
+    if u is None:
+        return JSONResponse({"ok": False, "msg": "The server restarted. Upload the video again."}, status_code=404)
+    form = await request.form()
+    file = form.get("thumb")
+    if file is None or not getattr(file, "filename", ""):
+        return JSONResponse({"ok": False, "msg": "No image received."}, status_code=400)
+    ext = THUMB_EXT.get((file.content_type or "").lower())
+    if not ext:
+        return JSONResponse({"ok": False, "msg": "Use a JPG, PNG, or WEBP image for the thumbnail."}, status_code=400)
+    body = await file.read()
+    if not body:
+        return JSONResponse({"ok": False, "msg": "That image is empty."}, status_code=400)
+    if len(body) > MAX_THUMB:
+        return JSONResponse({"ok": False, "msg": f"That image is over {MAX_THUMB // 1024 // 1024} MB."}, status_code=413)
+    old = u.get("thumb")
+    name = u["name"].rsplit(".", 1)[0] + "-thumb" + ext if "." in u["name"] else u["name"] + "-thumb" + ext
+    name = re.sub(r"[^\w .()\-]+", "", name)[:140] or ("thumb" + ext)
+    path = os.path.join(UPLOAD_DIR, request.path_params["uid"] + ".thumb" + ext)
+    with open(path, "wb") as f:
+        f.write(body)
+    if old and old["path"] != path:
+        try:
+            os.remove(old["path"])
+        except OSError:
+            pass
+    u["thumb"] = {"path": path, "name": name}
+    u["at"] = time.time()
+    return JSONResponse({"ok": True, "name": name})
+
+
 async def upload_done(request):
     """The whole file is here: make one post per chosen Page, give each a time, and send them to Facebook."""
     if not api_ok(request):
@@ -425,10 +477,22 @@ async def upload_done(request):
         data = json.loads(await request.body())
         page_ids = [int(x) for x in data.get("pages", [])][:200]
         caption = str(data.get("caption", "")).strip()[:CAPTION_MAX]
-        now_mode = data.get("when") == "now"
+        mode = str(data.get("when", "queue"))
+        now_mode = mode == "now"
+        at_text = str(data.get("at", ""))
         ai = bool(data.get("ai", True))
     except (ValueError, TypeError):
         return JSONResponse({"ok": False, "msg": "Bad request."}, status_code=400)
+    at = None
+    if mode == "at":                     # a date and time picked for this video
+        at = parse_local(at_text)
+        if at is None:
+            return JSONResponse({"ok": False, "msg": "Pick a date and time for this video."}, status_code=400)
+        if at < db.utcnow() + dt.timedelta(minutes=15):
+            return JSONResponse({"ok": False, "msg": "Pick a time at least 15 minutes from now."}, status_code=400)
+        if at > db.utcnow() + dt.timedelta(days=MAX_DAYS):
+            return JSONResponse({"ok": False, "msg": f"Facebook schedules up to {MAX_DAYS} days ahead. "
+                                                     "Pick an earlier date."}, status_code=400)
     pages = {p.id: p for p in await run(db.list_pages, True)}
     chosen = [pages[i] for i in dict.fromkeys(page_ids) if i in pages]
     if not chosen:
@@ -440,6 +504,8 @@ async def upload_done(request):
             continue
         if now_mode:
             when = None
+        elif at is not None:
+            when = at
         else:
             free = next_free(p.slots, await run(db.taken_times, p.id), 1)
             if not free:
@@ -448,14 +514,16 @@ async def upload_done(request):
             when = free[0]
         text = caption + (("\n\n" + p.tags) if p.tags and p.tags not in caption else "")
         rows.append({"page_id": p.id, "batch": uid, "file_name": u["name"], "caption": text[:CAPTION_MAX],
-                     "scheduled_at": when, "ai": ai, "status": "waiting"})
+                     "scheduled_at": when, "ai": ai, "status": "waiting",
+                     "thumb_name": (u.get("thumb") or {}).get("name", "")})
         plan.append({"page": p.name, "when": when_text(when)})
     if not rows:
         return JSONResponse({"ok": False, "msg": "Couldn't schedule it: " + "; ".join(skipped)}, status_code=400)
     ids = await run(db.add_posts, rows)
     RUNNING.update(ids)
+    thumb_path = (u.get("thumb") or {}).get("path", "")
     UPLOADS.pop(uid, None)
-    spawn(_send(u["path"], u["size"], ids))
+    spawn(_send(u["path"], u["size"], ids, thumb_path))
     return JSONResponse({"ok": True, "ids": ids, "plan": plan, "skipped": skipped})
 
 
@@ -471,7 +539,7 @@ def _fb_problem(e: "fb.FBError") -> str:
     return f"Facebook said: {e.message}"
 
 
-async def _send(path: str, size: int, ids: list) -> None:
+async def _send(path: str, size: int, ids: list, thumb_path: str = "") -> None:
     """Send one uploaded video to every Page it was scheduled for, one after another."""
     try:
         async with SEND_LOCK:
@@ -485,20 +553,27 @@ async def _send(path: str, size: int, ids: list) -> None:
                 when_ts = None
                 if post.scheduled_at is not None:
                     if post.scheduled_at < db.utcnow() + dt.timedelta(minutes=11):
-                        # the upload took so long that this time is too close: take the next free one
-                        free = next_free(p.slots, await run(db.taken_times, p.id) - {post.scheduled_at}, 1)
-                        if not free:
-                            await run(db.update_post, post.id, status="failed", error="No free posting time left.")
-                            continue
-                        await run(db.update_post, post.id, scheduled_at=free[0])
-                        post.scheduled_at = free[0]
+                        # the upload took so long that this time is too close: move it 15 minutes from now
+                        soon = db.utcnow() + dt.timedelta(minutes=15)
+                        soon = soon.replace(second=0, microsecond=0) + dt.timedelta(minutes=(5 - soon.minute % 5) % 5)
+                        await run(db.update_post, post.id, scheduled_at=soon)
+                        post.scheduled_at = soon
                     when_ts = int(post.scheduled_at.replace(tzinfo=dt.timezone.utc).timestamp())
                 try:
                     video_id, upload_url = await fb.reel_start(p.fb_page_id, token)
                     await run(db.update_post, post.id, video_id=video_id)
                     await fb.reel_upload(upload_url, token, path, size)
                     await fb.reel_finish(p.fb_page_id, token, video_id, post.caption, when_ts, post.ai)
-                    await run(db.update_post, post.id, status="scheduled", sent_at=db.utcnow(), error="")
+                    note = ""
+                    if thumb_path and post.thumb_name:
+                        try:
+                            await fb.set_thumbnail(video_id, token, thumb_path)
+                        except fb.FBError as te:
+                            # not fatal: the Reel is still scheduled, just with Facebook's own auto cover
+                            log.warning("Thumbnail for page %s didn't take: %s", p.fb_page_id, te.message)
+                            note = ("Thumbnail wasn't accepted, so Facebook will pick the cover. "
+                                    f"Facebook said: {te.message}")[:500]
+                    await run(db.update_post, post.id, status="scheduled", sent_at=db.utcnow(), error=note)
                 except fb.FBError as e:
                     log.warning("Reel for page %s failed: %s (code %s)", p.fb_page_id, e.message, e.code)
                     await run(db.update_post, post.id, status="failed", error=_fb_problem(e)[:500])
@@ -513,6 +588,11 @@ async def _send(path: str, size: int, ids: list) -> None:
             os.remove(path)
         except OSError:
             pass
+        if thumb_path:
+            try:
+                os.remove(thumb_path)
+            except OSError:
+                pass
 
 
 async def _check_live() -> None:
@@ -588,7 +668,8 @@ async def queue_page(request):
         days.setdefault(r["day"], []).append(r)
     recent = [_post_row(x, by_id) for x in await run(db.recent_posts)]
     return page(request, "queue.html", groups=groups, days=[(_day_title(k), v) for k, v in days.items()],
-                recent=recent, tz=str(TZ.key), has_pages=bool(usable), max_mb=MAX_VIDEO // 1024 // 1024)
+                recent=recent, tz=str(TZ.key), has_pages=bool(usable), max_mb=MAX_VIDEO // 1024 // 1024,
+                max_days=MAX_DAYS)
 
 
 async def posts_api(request):
@@ -701,6 +782,7 @@ routes = [
     Route("/fb/callback", fb_callback),
     Route("/api/upload", upload_init, methods=["POST"]),
     Route("/api/upload/{uid}", upload_chunk, methods=["PUT"]),
+    Route("/api/upload/{uid}/thumb", upload_thumb, methods=["POST"]),
     Route("/api/upload/{uid}/done", upload_done, methods=["POST"]),
     Route("/api/posts", posts_api),
     Route("/posts/cancel", post_cancel, methods=["POST"]),

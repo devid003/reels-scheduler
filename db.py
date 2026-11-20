@@ -2,7 +2,7 @@
 import datetime as dt
 import os
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, func, select
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, func, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -71,14 +71,27 @@ class Post(Base):
     status: Mapped[str] = mapped_column(String(20), default="waiting", index=True)
     # waiting -> sending -> scheduled -> posted   (or failed / canceled)
     video_id: Mapped[str] = mapped_column(String(40), default="")
+    thumb_name: Mapped[str] = mapped_column(String(200), default="")   # custom cover photo file, if any
     error: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
     sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+def _ensure_column(table: str, col: str, ddl: str) -> None:
+    """Add a column to an existing table if it's not there yet (safe, non-destructive)."""
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns(table)}
+    except Exception:
+        return
+    if col not in cols:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+
+
 def init() -> None:
     Base.metadata.create_all(engine)
+    _ensure_column("posts", "thumb_name", "VARCHAR(200) DEFAULT ''")
 
 
 # ---------- settings ----------

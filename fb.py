@@ -125,6 +125,18 @@ async def reel_finish(page_id: str, token: str, video_id: str, description: str,
     return r
 
 
+async def set_thumbnail(video_id: str, token: str, path: str) -> None:
+    """Set a custom cover photo for a video/Reel. Best-effort: caller should treat failure as non-fatal."""
+    with open(path, "rb") as f:
+        data = aiohttp.FormData()
+        data.add_field("is_preferred", "true")
+        data.add_field("access_token", token)
+        data.add_field("source", f, filename=os.path.basename(path), content_type="image/jpeg")
+        r = await _call("POST", f"{video_id}/thumbnails", data=data, timeout=60)
+    if r.get("success") is False:
+        raise FBError("Facebook did not accept the thumbnail.")
+
+
 async def video_status(video_id: str, token: str) -> dict:
     r = await _call("GET", video_id, {"fields": "status,permalink_url", "access_token": token})
     return r

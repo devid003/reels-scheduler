@@ -24,6 +24,16 @@ summary.panel-h{padding-bottom:16px}
 .chk{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;cursor:pointer;height:40px}
 .chk input{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .off{opacity:.55}
+div.f{font-size:13px;font-weight:600;color:var(--soft)}
+.slots{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px;min-height:30px;align-items:center}
+.slot{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 4px 0 11px;border-radius:999px;background:rgba(242,184,75,.1);
+  border:1px solid rgba(242,184,75,.35);color:var(--time);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.slot button{border:0;background:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:50%}
+.slot button:hover{background:rgba(242,184,75,.18)}
+.slots .none{color:var(--faint);font-size:12.5px;font-weight:400}
+.addt{display:flex;gap:6px}
+.addt input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line2);border-radius:9px;color:var(--ink);font:inherit;font-size:14px;padding:6px 9px;color-scheme:dark}
+.prow.dirty .save{background:var(--accent);border-color:var(--accent);color:#fff}
 @media (max-width:1000px){.grid2{grid-template-columns:1fr}.prow{grid-template-columns:1fr 1fr}.pname{grid-column:1/-1}}
 @media (max-width:560px){.prow{grid-template-columns:1fr}}
 </style>
@@ -39,7 +49,7 @@ summary.panel-h{padding-bottom:16px}
       {% if rows %}
       <div style="margin-top:6px">
       {% for r in rows %}{% set p = r.p %}
-        <form method="post" action="/pages/save" class="prow{{ ' off' if not p.active or p.gone }}" id="p{{ p.id }}">
+        <form method="post" action="/pages/save" class="prow{{ ' off' if not p.active or p.gone }}" id="p{{ p.id }}" novalidate>
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ p.id }}">
           <div class="pname">
             {% if p.picture %}<img class="av" src="{{ p.picture }}" alt="">{% else %}<span class="av ph">{{ p.name[:1] }}</span>{% endif %}
@@ -47,11 +57,15 @@ summary.panel-h{padding-bottom:16px}
               <small>{% if p.gone %}Not connected anymore{% else %}{{ r.account }}{% endif %}</small>
               {% if r.next %}<div class="next">Next free: {{ r.next }}</div>{% endif %}</div>
           </div>
-          <label class="f">Posting times<input type="text" name="slots" value="{{ p.slots }}" placeholder="9:00, 1:00 PM, 20:30"></label>
+          <div class="f">Posting times
+            <input type="hidden" name="slots" value="{{ p.slots }}">
+            <div class="slots" aria-live="polite">{% for h, m in parse_slots(p.slots)[0] %}<span class="slot" data-t="{{ '%02d:%02d' % (h, m) }}">{{ fmt_time(h, m) }}</span>{% else %}<span class="none">No times yet</span>{% endfor %}</div>
+            <div class="addt"><input type="time" aria-label="Posting time to add for {{ p.name }}"><button type="button" class="btn sm">Add</button></div>
+          </div>
           <label class="f">Always add (hashtags)<input type="text" name="tags" value="{{ p.tags }}" placeholder="#fyp #reels"></label>
           <div class="pact">
             <label class="chk"><input type="checkbox" name="active" value="1"{{ ' checked' if p.active }}> Use</label>
-            <button class="btn sm">Save</button>
+            <button class="btn sm save">Save</button>
           </div>
         </form>
       {% endfor %}
@@ -107,6 +121,34 @@ summary.panel-h{padding-bottom:16px}
   </div>
 </main>
 <script>
+(function(){
+  function fmt(t){var h=+t.slice(0,2),m=t.slice(3,5),ap=h<12?'AM':'PM';return ((h%12)||12)+':'+m+' '+ap;}
+  Array.prototype.forEach.call(document.querySelectorAll('form.prow'),function(f){
+    var hidden=f.querySelector('input[name=slots]'), box=f.querySelector('.slots'), pick=f.querySelector('.addt input'), add=f.querySelector('.addt button');
+    var times=Array.prototype.map.call(box.querySelectorAll('.slot'),function(s){return s.getAttribute('data-t');});
+    function draw(){
+      times.sort(); hidden.value=times.join(', '); box.innerHTML='';
+      if(!times.length){var n=document.createElement('span');n.className='none';n.textContent='No times yet';box.appendChild(n);}
+      times.forEach(function(t){
+        var s=document.createElement('span'); s.className='slot'; s.textContent=fmt(t);
+        var x=document.createElement('button'); x.type='button'; x.textContent='\u00d7'; x.setAttribute('aria-label','Remove '+fmt(t));
+        x.addEventListener('click',function(){times.splice(times.indexOf(t),1);draw();f.classList.add('dirty');});
+        s.appendChild(x); box.appendChild(s);
+      });
+    }
+    add.addEventListener('click',function(){
+      var t=(pick.value||'').slice(0,5); if(!/^\d\d:\d\d$/.test(t)){pick.focus();if(pick.showPicker)try{pick.showPicker();}catch(e){}return;}
+      if(times.indexOf(t)<0){times.push(t);draw();f.classList.add('dirty');}
+      pick.value='';
+    });
+    pick.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();add.click();}});
+    f.querySelector('input[name=tags]').addEventListener('input',function(){f.classList.add('dirty');});
+    f.querySelector('input[name=active]').addEventListener('change',function(){f.classList.add('dirty');});
+    draw();
+  });
+  window.addEventListener('beforeunload',function(e){if(document.querySelector('form.prow.dirty:not(.sending)')){e.preventDefault();e.returnValue='';}});
+  Array.prototype.forEach.call(document.querySelectorAll('form.prow'),function(f){f.addEventListener('submit',function(){f.classList.add('sending');});});
+})();
 document.addEventListener('click',function(e){
   var b=e.target.closest&&e.target.closest('[data-copy]'); if(!b)return;
   var t=document.getElementById(b.getAttribute('data-copy')).textContent;

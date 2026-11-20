@@ -19,6 +19,12 @@
 .file .meta{font-size:12px;color:var(--faint);margin:2px 0 6px}
 .file .meta .warnt{color:var(--warn)}
 .file textarea{min-height:58px;font-size:13.5px;padding:7px 9px}
+.thumbrow{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+.thumbrow [hidden]{display:none!important}
+.thumbprev{width:34px;height:60px;object-fit:cover;border-radius:6px;background:#000}
+.thumbname{font-size:12px;color:var(--soft);overflow:hidden;text-overflow:ellipsis;max-width:160px;white-space:nowrap}
+.thumbname.bad{color:var(--warn)}
+.thumbx{border:0;background:none;color:var(--faint);cursor:pointer;font-size:16px;line-height:1;padding:2px 4px}
 .prog{height:6px;border-radius:6px;background:var(--line);overflow:hidden;margin-top:8px}
 .prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 .res{font-size:12.5px;margin-top:6px;color:var(--soft)}
@@ -35,7 +41,16 @@
 .chip input:checked+span{border-color:var(--accent);background:rgba(76,125,255,.14)}
 .chip input:focus-visible+span{outline:2px solid var(--accent2);outline-offset:2px}
 .chip.noslot span{border-style:dashed}
-.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+@media (max-width:460px){.seg{grid-template-columns:1fr}}
+.at{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin:0 0 6px}
+.at[hidden],.atv[hidden]{display:none}
+@media (max-width:460px){.at{grid-template-columns:minmax(0,1fr)}}
+.at label{display:block;min-width:0;font-size:12px;font-weight:600;color:var(--soft)}
+.at input{width:100%;min-width:0;box-sizing:border-box;margin-top:4px;background:var(--surface);border:1px solid var(--line2);border-radius:9px;color:var(--ink);font:inherit;font-size:14px;padding:7px 9px;color-scheme:dark}
+.at input:focus{border-color:var(--accent);outline:none}
+.atv{font-size:12.5px;color:var(--time);margin:0 0 6px;font-variant-numeric:tabular-nums}
+.atv.bad{color:var(--bad)}
 .seg label{position:relative}
 .seg input{position:absolute;opacity:0;pointer-events:none}
 .seg span{display:block;border:1px solid var(--line2);border-radius:10px;padding:9px 11px;cursor:pointer;font-size:13.5px;font-weight:600;height:100%}
@@ -59,6 +74,7 @@
 .item .who b{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .item .who span{display:block;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .item .err{color:var(--bad);font-size:12.5px;white-space:normal}
+.item .note{color:var(--warn);font-size:12.5px;white-space:normal}
 .item .r{display:flex;gap:8px;align-items:center;justify-content:flex-end}
 .hist .t{color:var(--faint)}
 @media (max-width:1060px){.cols{grid-template-columns:1fr}.up{position:static}}
@@ -76,7 +92,7 @@
       {% if not has_pages %}
         <div class="empty" style="padding:10px 0">No Pages to post to yet. <a href="/pages">Connect a Facebook account</a> first.</div>
       {% else %}
-        <form id="up" autocomplete="off">
+        <form id="up" autocomplete="off" novalidate>
           <label class="drop" id="drop"><input type="file" id="pick" accept="video/mp4,video/quicktime,video/*" multiple>
             <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 20h14"/></svg>
             <b>Drop videos here or choose files</b><span>You can add many at once</span></label>
@@ -97,6 +113,7 @@
           <div class="lbl"><span>When</span></div>
           <div class="seg">
             <label><input type="radio" name="when" value="queue" checked><span>Next free time<small>From each Page's posting times</small></span></label>
+            <label><input type="radio" name="when" value="at"><span>Pick date &amp; time<small>Choose it for each video</small></span></label>
             <label><input type="radio" name="when" value="now"><span>Right away<small>Posts as soon as it's sent</small></span></label>
           </div>
           <label class="ai"><input type="checkbox" id="ai" checked><span>Label as made with AI<small>Facebook shows an "AI info" label. Meta asks for it on realistic AI video.</small></span></label>
@@ -117,7 +134,7 @@
             <div class="item">
               <div class="t">{{ r.when.split(', ')[-1] if r.day else 'Now' }}</div>
               <div class="who">{% if r.pic %}<img class="av" src="{{ r.pic }}" alt="">{% else %}<i class="av ph">{{ r.page[:1] }}</i>{% endif %}
-                <div><b>{{ r.page }}</b><span>{{ r.caption or r.file }}</span></div></div>
+                <div><b>{{ r.page }}</b><span>{{ r.caption or r.file }}</span>{% if r.error %}<div class="note">{{ r.error }}</div>{% endif %}</div></div>
               <div class="r">
                 {% if r.status == 'scheduled' %}<span class="badge time">On Facebook</span>
                 {% elif r.status == 'sending' %}<span class="badge go">Sending</span>
@@ -180,7 +197,12 @@
       var it={file:f,done:false}, el=document.createElement('div'); el.className='file'; it.el=el;
       var url=URL.createObjectURL(f);
       el.innerHTML='<video muted playsinline preload="metadata"></video><div><div class="top"><span class="nm"></span><button type="button" class="x" aria-label="Remove">&times;</button></div>'+
-        '<div class="meta"></div><textarea maxlength="2200" placeholder="Caption (optional)"></textarea><div class="prog" hidden><i></i></div><div class="res" role="status"></div></div>';
+        '<div class="meta"></div><div class="at" hidden><label>Date<input type="date" class="d"></label><label>Time<input type="time" class="tm"></label></div>'+
+        '<div class="atv" hidden></div><textarea maxlength="2200" placeholder="Caption (optional)"></textarea>'+
+        '<div class="thumbrow"><img class="thumbprev" hidden><button type="button" class="btn sm thumbbtn">Add thumbnail</button>'+
+        '<input type="file" class="thumbinp" accept="image/jpeg,image/png,image/webp" hidden><span class="thumbname"></span>'+
+        '<button type="button" class="x thumbx" hidden aria-label="Remove thumbnail">&times;</button></div>'+
+        '<div class="prog" hidden><i></i></div><div class="res" role="status"></div></div>';
       el.querySelector('.nm').textContent=f.name;
       var v=el.querySelector('video'), meta=el.querySelector('.meta');
       meta.textContent=mb(f.size);
@@ -197,10 +219,55 @@
       if(f.size>MAX){meta.textContent=mb(f.size)+' is over the limit';meta.className='meta warnt';it.done=true;}
       el.querySelector('.x').addEventListener('click',function(){if(it.sending)return;items.splice(items.indexOf(it),1);el.remove();URL.revokeObjectURL(url);label();});
       el.querySelector('textarea').addEventListener('contextmenu',function(e){e.stopPropagation();});
+      el.querySelector('.d').addEventListener('change',function(){showAt(it);});
+      el.querySelector('.tm').addEventListener('change',function(){showAt(it);});
+      var tbtn=el.querySelector('.thumbbtn'), tinp=el.querySelector('.thumbinp'), tprev=el.querySelector('.thumbprev'),
+          tname=el.querySelector('.thumbname'), tx=el.querySelector('.thumbx');
+      tbtn.addEventListener('click',function(){tinp.click();});
+      tinp.addEventListener('change',function(){
+        var tf=tinp.files[0]; if(!tf)return;
+        if(tf.size>8*1048576){tname.textContent='Too big (max 8 MB)';tname.className='thumbname bad';tinp.value='';return;}
+        tname.className='thumbname';
+        it.thumbFile=tf; tname.textContent=tf.name;
+        var tu=URL.createObjectURL(tf); tprev.src=tu; tprev.hidden=false; tbtn.hidden=true; tx.hidden=false;
+      });
+      tx.addEventListener('click',function(){
+        it.thumbFile=null; tinp.value=''; tname.textContent=''; tprev.hidden=true; tbtn.hidden=false; tx.hidden=true;
+      });
       items.push(it); list.appendChild(el);
     });
-    label();
+    syncWhen(); label();
   }
+  /* ---- pick date & time ---- */
+  function pad(n){return (n<10?'0':'')+n;}
+  function ymd(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+  function mode(){return form.querySelector('input[name=when]:checked').value;}
+  function atOf(it){var d=it.el.querySelector('.d').value,t=it.el.querySelector('.tm').value;return d&&t?new Date(d+'T'+t):null;}
+  function fillAt(it){
+    if(it.el.querySelector('.d').value&&it.el.querySelector('.tm').value)return;
+    var prev=null; items.forEach(function(o){if(o!==it&&!o.done){var x=atOf(o);if(x&&(!prev||x>prev))prev=x;}});
+    var t=prev?new Date(prev.getTime()+3600000):new Date(Date.now()+3600000);
+    if(!prev){t.setMinutes(0,0,0);t=new Date(t.getTime()+3600000);}
+    it.el.querySelector('.d').value=ymd(t); it.el.querySelector('.tm').value=pad(t.getHours())+':'+pad(t.getMinutes());
+  }
+  function showAt(it){
+    var v=it.el.querySelector('.atv'), t=atOf(it);
+    if(!t){v.textContent='Pick a date and a time.';v.className='atv bad';return false;}
+    var txt=t.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})+', '+t.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    if(t.getTime()<Date.now()+15*60000){v.textContent=txt+': too soon, pick at least 15 minutes from now';v.className='atv bad';return false;}
+    if(t.getTime()>Date.now()+{{ max_days }}*86400000){v.textContent=txt+': too far, Facebook allows up to {{ max_days }} days ahead';v.className='atv bad';return false;}
+    v.textContent='Posts '+txt;v.className='atv';return true;
+  }
+  function syncWhen(){
+    var on=mode()==='at', today=new Date(), last=new Date(Date.now()+{{ max_days }}*86400000);
+    items.forEach(function(it){
+      if(it.done)return;
+      it.el.querySelector('.at').hidden=!on; it.el.querySelector('.atv').hidden=!on;
+      var d=it.el.querySelector('.d'); d.min=ymd(today); d.max=ymd(last);
+      if(on){fillAt(it);showAt(it);}
+    });
+  }
+  Array.prototype.forEach.call(form.querySelectorAll('input[name=when]'),function(r){r.addEventListener('change',syncWhen);});
   pick.addEventListener('change',function(){add(pick.files);pick.value='';});
   ['dragenter','dragover'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.add('over');});});
   ['dragleave','drop'].forEach(function(t){drop.addEventListener(t,function(e){e.preventDefault();drop.classList.remove('over');});});
@@ -212,7 +279,7 @@
       .then(function(r){return r.json().catch(function(){return {ok:false,msg:'The server had a problem ('+r.status+').'};}).then(function(j){j._status=r.status;return j;});});
   }
   function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
-  async function sendFile(it,pages,when,ai){
+  async function sendFile(it,pages,when,ai,at){
     var el=it.el, bar=el.querySelector('.prog'), fill=bar.querySelector('i'), res=el.querySelector('.res');
     function say(t,bad){res.textContent=t;res.className='res'+(bad?' bad':'');}
     it.sending=true; bar.hidden=false; say('Uploading...');
@@ -228,8 +295,15 @@
       if(r._status===0&&++tries<=4){say('Connection hiccup, retrying...');await sleep(1500*tries);continue;}
       throw new Error(r.msg||'Upload stopped. Check your connection and try again.');
     }
+    if(it.thumbFile){
+      say('Uploading thumbnail...');
+      var tfd=new FormData(); tfd.append('thumb',it.thumbFile);
+      var tr=await fetch('/api/upload/'+init.id+'/thumb',{method:'POST',credentials:'same-origin',headers:{'X-CSRF':CSRF},body:tfd})
+        .then(function(r){return r.json().catch(function(){return {ok:false};});});
+      if(!tr.ok)say('Thumbnail didn\'t upload, continuing without it...');
+    }
     say('Sending to Facebook...');
-    var done=await api('POST','/api/upload/'+init.id+'/done',{caption:el.querySelector('textarea').value,pages:pages,when:when,ai:ai},true);
+    var done=await api('POST','/api/upload/'+init.id+'/done',{caption:el.querySelector('textarea').value,pages:pages,when:when,at:at||'',ai:ai},true);
     if(!done.ok)throw new Error(done.msg||'Could not schedule it.');
     var plan=done.plan.map(function(p){return p.page+': '+p.when;}).join('; ');
     say((done.skipped&&done.skipped.length?'Skipped '+done.skipped.join('; ')+'. ':'')+'Sending to Facebook. '+plan);
@@ -252,11 +326,14 @@
     msg.textContent='';
     if(!pages.length){msg.textContent='Pick at least one Page.';return;}
     if(when==='queue'){var none=Array.prototype.filter.call(form.querySelectorAll('input[name=page]:checked'),function(c){return c.getAttribute('data-slots')==='0';});
-      if(none.length){msg.textContent='Some Pages you picked have no posting times. Set them on the Pages tab, or choose Right away.';return;}}
+      if(none.length){msg.textContent='Some Pages you picked have no posting times. Set them on the Pages tab, or choose another option.';return;}}
+    if(when==='at'){var bad=items.filter(function(it){return !it.done&&!showAt(it);});
+      if(bad.length){msg.textContent='Check the date and time on '+(bad.length>1?bad.length+' videos':'the video')+' marked in red.';return;}}
     busy=true; label(); var allOk=true;
     for(var i=0;i<items.length;i++){
       var it=items[i]; if(it.done)continue;
-      try{ if(!await sendFile(it,pages,when,$('ai').checked))allOk=false; }
+      var at=when==='at'?it.el.querySelector('.d').value+'T'+it.el.querySelector('.tm').value:'';
+      try{ if(!await sendFile(it,pages,when,$('ai').checked,at))allOk=false; }
       catch(err){allOk=false;var res=it.el.querySelector('.res');res.textContent=err.message;res.className='res bad';}
       it.done=true; it.sending=false;
     }
